@@ -4,7 +4,7 @@ import { fetchPublicProfiles } from '../services/dbService';
 
 interface HomePageProps {
   onNavigate: (page: string, params?: any) => void;
-  onOpenSearch: () => void;
+  onOpenSearch: (query?: string) => void;
 }
 
 export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onOpenSearch }) => {
@@ -25,15 +25,23 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onOpenSearch }) 
 
   const handleQuickOpen = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!quickId.trim()) return;
+    if (!quickId.trim()) {
+      onOpenSearch();
+      return;
+    }
     let extracted = quickId.trim();
     if (extracted.includes('/profile/')) {
       const parts = extracted.split('/profile/');
-      extracted = parts[parts.length - 1];
-    }
-    extracted = extracted.replace(/[^a-zA-Z0-9_-]/g, '').toUpperCase();
-    if (extracted) {
+      extracted = parts[parts.length - 1].split('?')[0].split('#')[0];
       onNavigate('viewer', { id: extracted });
+      return;
+    }
+
+    const cleanId = extracted.replace(/[^a-zA-Z0-9_-]/g, '').toUpperCase();
+    if (cleanId.length === 6 && !quickId.includes(' ')) {
+      onNavigate('viewer', { id: cleanId });
+    } else {
+      onOpenSearch(quickId.trim());
     }
   };
 
@@ -77,7 +85,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onOpenSearch }) 
             </button>
 
             <button
-              onClick={onOpenSearch}
+              onClick={() => onOpenSearch()}
               className="px-6 py-3.5 bg-slate-900/80 hover:bg-slate-800 text-slate-300 font-semibold text-base rounded-2xl border border-slate-700/80 flex items-center space-x-2 transition-all"
             >
               <Search className="w-5 h-5 text-purple-400" />
@@ -93,7 +101,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onOpenSearch }) 
               <Search className="absolute left-3.5 top-3.5 w-5 h-5 text-slate-400" />
               <input
                 type="text"
-                placeholder="Have a Profile ID? Enter profile code..."
+                placeholder="Search profile by name"
                 value={quickId}
                 onChange={(e) => setQuickId(e.target.value)}
                 className="w-full pl-11 pr-4 py-3 bg-slate-950/80 border border-slate-700 rounded-xl text-white placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -103,7 +111,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onOpenSearch }) 
               type="submit"
               className="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm rounded-xl shrink-0 transition-colors"
             >
-              Open
+              Search
             </button>
           </form>
         </div>
@@ -192,10 +200,10 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate, onOpenSearch }) 
             <p className="text-sm text-slate-600">Select a pre-built profile to calculate your GPA instantly.</p>
           </div>
           <button
-            onClick={onOpenSearch}
+            onClick={() => onOpenSearch()}
             className="text-indigo-600 font-bold text-sm hover:underline flex items-center space-x-1"
           >
-            <span>Search by Profile ID</span>
+            <span>Search profile by name</span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>

@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Calculator, PlusCircle, Search, Menu, X, GraduationCap } from 'lucide-react';
+import { Calculator, PlusCircle, Search, Menu, X } from 'lucide-react';
+import { Logo } from './Logo';
 
 interface NavbarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
-  openSearchModal: () => void;
+  openSearchModal: (query?: string) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, openSearchModal }) => {
@@ -21,19 +22,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, openSea
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Brand Logo */}
-          <div
-            onClick={() => handleNav('home')}
-            className="flex items-center space-x-3 cursor-pointer group"
-          >
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
-              <GraduationCap className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <span className="text-xl font-bold bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
-                Calculate GPA Plus
-              </span>
-            </div>
-          </div>
+          <Logo size="md" variant="dark" onClick={() => handleNav('home')} />
 
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center space-x-1">
@@ -84,11 +73,11 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, openSea
           {/* Quick Search trigger button */}
           <div className="hidden sm:flex items-center space-x-2">
             <button
-              onClick={openSearchModal}
+              onClick={() => openSearchModal()}
               className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-xs font-medium flex items-center space-x-2 transition-all shadow-inner"
             >
               <Search className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Search Profile ID...</span>
+              <span>Search profile by name...</span>
               <kbd className="bg-slate-900 px-1.5 py-0.5 text-[10px] text-slate-400 rounded border border-slate-700">⌘K</kbd>
             </button>
           </div>

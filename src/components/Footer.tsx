@@ -1,17 +1,12 @@
 import React from 'react';
-import { GraduationCap } from 'lucide-react';
+import { Logo } from './Logo';
 
 export const Footer: React.FC = () => {
   return (
     <footer className="bg-slate-900 border-t border-slate-800 text-slate-400 py-12 px-4 sm:px-6 lg:px-8 mt-16">
       <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-8">
         <div className="space-y-4 md:col-span-2">
-          <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold">
-              <GraduationCap className="w-5 h-5" />
-            </div>
-            <span className="text-lg font-bold text-white">Calculate GPA Plus</span>
-          </div>
+          <Logo size="md" variant="dark" />
           <p className="text-xs text-slate-400 max-w-sm leading-relaxed">
             The complete academic GPA & CGPA calculation platform for university students. Create reusable academic profiles with fixed subjects and credits, share with batchmates, and export official PDF transcripts.
           </p>

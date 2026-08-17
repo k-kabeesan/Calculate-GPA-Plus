@@ -16,28 +16,27 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
 }) => {
   const [step, setStep] = useState(1);
 
-  // Form states
-  const [profileName, setProfileName] = useState('Technology Year 1 Semester 1');
-  const [university, setUniversity] = useState('Wayamba University of Sri Lanka');
-  const [faculty, setFaculty] = useState('Faculty of Technology');
-  const [degree, setDegree] = useState('Bachelor of Technology');
-  const [academicYear, setAcademicYear] = useState('2024/2025');
-  const [description, setDescription] = useState('Official subject and fixed credit structure for Year 1 Technology students.');
+  // Form states - starting completely empty without default/example text
+  const [profileName, setProfileName] = useState('');
+  const [university, setUniversity] = useState('');
+  const [faculty, setFaculty] = useState('');
+  const [degree, setDegree] = useState('');
+  const [academicYear, setAcademicYear] = useState('');
+  const [description, setDescription] = useState('');
   const [visibility] = useState<'public' | 'shared' | 'private'>('public');
   const [passcode, setPasscode] = useState('');
 
-  // Semesters & Subjects state
+  // Semesters & Subjects state - start empty without prefilled sample values
   const [semesters, setSemesters] = useState<Semester[]>([
     {
-      semester_name: 'Semester 1',
+      semester_name: '',
       semester_order: 1,
-      subjects: initialSubjects && initialSubjects.length > 0 ? initialSubjects : [
-        { subject_name: 'Chemistry', credit: 2 },
-        { subject_name: 'Physics', credit: 3 },
-        { subject_name: 'Programming', credit: 3 },
-        { subject_name: 'Mathematics', credit: 2 },
-        { subject_name: 'Electronics', credit: 2 },
-      ]
+      subjects: initialSubjects && initialSubjects.length > 0
+        ? initialSubjects.map(s => ({ subject_name: s.subject_name || '', credit: s.credit || ('' as any) }))
+        : [
+            { subject_name: '', credit: '' as any },
+            { subject_name: '', credit: '' as any },
+          ]
     }
   ]);
 
@@ -57,11 +56,11 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
     setSemesters([
       ...semesters,
       {
-        semester_name: `Semester ${order}`,
+        semester_name: '',
         semester_order: order,
         subjects: [
-          { subject_name: 'Subject 1', credit: 3 },
-          { subject_name: 'Subject 2', credit: 3 },
+          { subject_name: '', credit: '' as any },
+          { subject_name: '', credit: '' as any },
         ]
       }
     ]);
@@ -81,8 +80,8 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
   const handleAddSubject = (semIdx: number) => {
     const updated = [...semesters];
     updated[semIdx].subjects.push({
-      subject_name: `New Subject ${updated[semIdx].subjects.length + 1}`,
-      credit: 3
+      subject_name: '',
+      credit: '' as any
     });
     setSemesters(updated);
   };
@@ -105,19 +104,37 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
   // Submit Handler
   const handleSubmitProfile = async () => {
     setError('');
+
+    if (!profileName.trim() || !university.trim() || !faculty.trim() || !degree.trim()) {
+      setError('Please fill out Profile Name, University, Faculty, and Degree.');
+      return;
+    }
+
+    // Filter valid semesters and subjects
+    const cleanedSemesters = semesters.map((sem, idx) => ({
+      ...sem,
+      semester_name: sem.semester_name.trim() || `Semester ${idx + 1}`,
+      subjects: sem.subjects.filter(sub => sub.subject_name.trim() && Number(sub.credit) > 0)
+    })).filter(sem => sem.subjects.length > 0);
+
+    if (cleanedSemesters.length === 0) {
+      setError('Please add at least one subject with valid name and credit count (> 0).');
+      return;
+    }
+
     setSubmitting(true);
 
     try {
       const result = await createProfile({
-        profile_name: profileName,
-        university,
-        faculty,
-        degree,
-        academic_year: academicYear,
-        description,
+        profile_name: profileName.trim(),
+        university: university.trim(),
+        faculty: faculty.trim(),
+        degree: degree.trim(),
+        academic_year: academicYear.trim(),
+        description: description.trim(),
         visibility,
         passcode,
-        semesters,
+        semesters: cleanedSemesters,
         gradingScale
       });
 
@@ -201,8 +218,8 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
                 type="text"
                 value={profileName}
                 onChange={(e) => setProfileName(e.target.value)}
-                placeholder="e.g. Technology Year 1 Semester 1"
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                placeholder="Enter profile name"
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none placeholder-slate-400"
               />
             </div>
 
@@ -214,8 +231,8 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
                 type="text"
                 value={university}
                 onChange={(e) => setUniversity(e.target.value)}
-                placeholder="e.g. Wayamba University of Sri Lanka"
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                placeholder="Enter university name"
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none placeholder-slate-400"
               />
             </div>
 
@@ -227,8 +244,8 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
                 type="text"
                 value={faculty}
                 onChange={(e) => setFaculty(e.target.value)}
-                placeholder="e.g. Faculty of Technology"
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                placeholder="Enter faculty name"
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none placeholder-slate-400"
               />
             </div>
 
@@ -240,8 +257,8 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
                 type="text"
                 value={degree}
                 onChange={(e) => setDegree(e.target.value)}
-                placeholder="e.g. Bachelor of Technology"
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                placeholder="Enter degree or programme"
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none placeholder-slate-400"
               />
             </div>
 
@@ -254,7 +271,7 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
                 value={academicYear}
                 onChange={(e) => setAcademicYear(e.target.value)}
                 placeholder="e.g. 2024/2025"
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none placeholder-slate-400"
               />
             </div>
 
@@ -266,8 +283,8 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
                 rows={2}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Add helpful instructions or batch details..."
-                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                placeholder="Enter optional description"
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none placeholder-slate-400"
               />
             </div>
           </div>
@@ -318,12 +335,13 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
                     type="text"
                     value={sem.semester_name}
                     onChange={(e) => handleUpdateSemesterName(semIdx, e.target.value)}
-                    className="font-bold text-slate-900 text-base bg-white border border-slate-300 rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-indigo-500"
+                    placeholder={`Enter semester name (e.g. Semester ${semIdx + 1})`}
+                    className="font-bold text-slate-900 text-base bg-white border border-slate-300 rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-indigo-500 placeholder-slate-400 w-full max-w-sm"
                   />
                   {semesters.length > 1 && (
                     <button
                       onClick={() => handleRemoveSemester(semIdx)}
-                      className="text-xs font-semibold text-red-600 hover:underline flex items-center space-x-1"
+                      className="text-xs font-semibold text-red-600 hover:underline flex items-center space-x-1 shrink-0 ml-2"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                       <span>Remove Semester</span>
@@ -346,8 +364,8 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
                           type="text"
                           value={sub.subject_name}
                           onChange={(e) => handleUpdateSubject(semIdx, subIdx, 'subject_name', e.target.value)}
-                          placeholder="Subject Title (e.g. Chemistry)"
-                          className="w-full px-3 py-1.5 text-sm font-semibold text-slate-900 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          placeholder="Enter subject name"
+                          className="w-full px-3 py-1.5 text-sm font-semibold text-slate-900 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 placeholder-slate-400"
                         />
                       </div>
                       <div className="col-span-4">
@@ -357,8 +375,9 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
                           step="0.5"
                           max="20"
                           value={sub.credit || ''}
-                          onChange={(e) => handleUpdateSubject(semIdx, subIdx, 'credit', parseFloat(e.target.value) || 0)}
-                          className="w-full px-3 py-1.5 text-sm font-bold text-slate-900 text-center border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                          onChange={(e) => handleUpdateSubject(semIdx, subIdx, 'credit', e.target.value === '' ? '' : parseFloat(e.target.value) || 0)}
+                          placeholder="Enter credit"
+                          className="w-full px-3 py-1.5 text-sm font-bold text-slate-900 text-center border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 placeholder-slate-400 font-normal"
                         />
                       </div>
                       <div className="col-span-1 text-center">
@@ -379,7 +398,7 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
                   className="px-3.5 py-1.5 bg-white hover:bg-slate-100 text-indigo-600 text-xs font-bold rounded-lg border border-slate-200 flex items-center space-x-1"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>Add Subject to {sem.semester_name}</span>
+                  <span>Add Subject</span>
                 </button>
               </div>
             ))}
@@ -468,16 +487,18 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
           {/* Profile Overview Card */}
           <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="font-bold text-slate-900 text-base">{profileName}</h3>
+              <h3 className="font-bold text-slate-900 text-base">{profileName || 'Untitled Academic Profile'}</h3>
               <span className="text-xs font-semibold px-2.5 py-1 bg-indigo-100 text-indigo-800 rounded-lg capitalize">
                 {visibility} Profile
               </span>
             </div>
-            <p className="text-xs text-slate-600">{university} • {faculty} • {degree}</p>
+            <p className="text-xs text-slate-600">
+              {university || 'University not specified'} • {faculty || 'Faculty not specified'} • {degree || 'Degree not specified'}
+            </p>
             <div className="pt-2 text-xs text-slate-500 flex items-center space-x-4">
               <span>{semesters.length} Semesters</span>
-              <span>{semesters.reduce((acc, sem) => acc + sem.subjects.length, 0)} Total Subjects</span>
-              <span>{semesters.reduce((acc, sem) => acc + sem.subjects.reduce((sAcc, s) => sAcc + Number(s.credit), 0), 0)} Total Fixed Credits</span>
+              <span>{semesters.reduce((acc, sem) => acc + sem.subjects.filter(s => s.subject_name.trim()).length, 0)} Total Subjects</span>
+              <span>{semesters.reduce((acc, sem) => acc + sem.subjects.reduce((sAcc, s) => sAcc + Number(s.credit || 0), 0), 0)} Total Fixed Credits</span>
             </div>
           </div>
 
@@ -488,14 +509,14 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
               <h3 className="font-bold text-sm">Set Owner Edit Passcode (Optional)</h3>
             </div>
             <p className="text-xs text-slate-400">
-              Set a simple passcode if you want to edit, manage, or delete this profile later. Viewers do NOT need this passcode to calculate their GPA.
+              Set a passcode if you want to edit, manage, or delete this profile later. Viewers do NOT need this passcode to calculate their GPA.
             </p>
             <input
               type="password"
-              placeholder="e.g. 1234"
+              placeholder="Enter owner passcode (optional)"
               value={passcode}
               onChange={(e) => setPasscode(e.target.value)}
-              className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder-slate-500"
             />
           </div>
 

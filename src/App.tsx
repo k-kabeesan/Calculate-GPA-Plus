@@ -14,9 +14,15 @@ export function App() {
   const [activeTab, setActiveTab] = useState<'home' | 'normal' | 'create' | 'viewer' | 'manage' | 'about'>('home');
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   // State passed from normal calculator when user clicks "Save as Shared Profile"
   const [prefilledSubjects, setPrefilledSubjects] = useState<Subject[]>([]);
+
+  const handleOpenSearch = (query: string = '') => {
+    setSearchQuery(query);
+    setIsSearchModalOpen(true);
+  };
 
   // Parse URL hash for direct links like /#profile-ABC123
   useEffect(() => {
@@ -80,7 +86,7 @@ export function App() {
       <Navbar
         activeTab={activeTab}
         setActiveTab={(tab) => handleNavigate(tab)}
-        openSearchModal={() => setIsSearchModalOpen(true)}
+        openSearchModal={(query) => handleOpenSearch(query || '')}
       />
 
       {/* Main Content View */}
@@ -88,7 +94,7 @@ export function App() {
         {activeTab === 'home' && (
           <HomePage
             onNavigate={(page, params) => handleNavigate(page, params)}
-            onOpenSearch={() => setIsSearchModalOpen(true)}
+            onOpenSearch={(query) => handleOpenSearch(query || '')}
           />
         )}
 
@@ -126,6 +132,7 @@ export function App() {
       {/* Search / Open Profile Modal */}
       <SearchModal
         isOpen={isSearchModalOpen}
+        initialQuery={searchQuery}
         onClose={() => setIsSearchModalOpen(false)}
         onOpenProfile={(id) => handleNavigate('viewer', { id })}
       />

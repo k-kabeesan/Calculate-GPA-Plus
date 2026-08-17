@@ -1,5 +1,6 @@
 import React from 'react';
 import { ExternalLink, User } from 'lucide-react';
+import { Logo } from '../components/Logo';
 
 const InstagramIcon: React.FC<{ className?: string }> = ({ className = "w-5 h-5" }) => (
   <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -25,10 +26,8 @@ export const AboutPage: React.FC = () => {
   return (
     <div className="max-w-xl mx-auto py-16 px-4 sm:px-6 space-y-8 animate-fade-in text-slate-900">
       {/* Title & Creator Header */}
-      <div className="text-center space-y-3">
-        <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900">
-          Calculate GPA Plus
-        </h1>
+      <div className="text-center space-y-3 flex flex-col items-center">
+        <Logo size="lg" variant="light" />
         <div className="inline-flex items-center space-x-2 text-sm font-semibold text-slate-800 bg-slate-100 px-4 py-1.5 rounded-full border border-slate-200">
           <User className="w-4 h-4 text-slate-600" />
           <span>Created by K.Kabeesan</span>

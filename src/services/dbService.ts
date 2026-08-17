@@ -65,6 +65,7 @@ export async function fetchPublicProfiles(searchQuery: string = ''): Promise<any
     return (data || []).map(p => {
       let totalSubjects = 0;
       let totalCredits = 0;
+      const semesterCount = p.semesters && Array.isArray(p.semesters) ? p.semesters.length : 0;
       if (p.semesters && Array.isArray(p.semesters)) {
         p.semesters.forEach((sem: any) => {
           if (sem.subjects && Array.isArray(sem.subjects)) {
@@ -77,6 +78,7 @@ export async function fetchPublicProfiles(searchQuery: string = ''): Promise<any
       }
       return {
         ...p,
+        semester_count: semesterCount,
         total_subjects: totalSubjects,
         total_credits: Math.round(totalCredits * 100) / 100
       };
