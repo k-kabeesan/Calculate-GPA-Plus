@@ -31,7 +31,6 @@ export const ProfileManagePage: React.FC<ProfileManagePageProps> = ({
   const [profileName, setProfileName] = useState('');
   const [university, setUniversity] = useState('');
   const [faculty, setFaculty] = useState('');
-  const [degree, setDegree] = useState('');
   const [academicYear, setAcademicYear] = useState('');
   const [description, setDescription] = useState('');
   const [visibility, setVisibility] = useState<'public' | 'shared' | 'private'>('public');
@@ -51,9 +50,8 @@ export const ProfileManagePage: React.FC<ProfileManagePageProps> = ({
       .then((data: Profile) => {
         setProfile(data);
         setProfileName(data.profile_name);
-        setUniversity(data.university);
-        setFaculty(data.faculty);
-        setDegree(data.degree);
+        setUniversity(data.university || '');
+        setFaculty(data.faculty || '');
         setAcademicYear(data.academic_year || '');
         setDescription(data.description || '');
         setVisibility(data.visibility || 'public');
@@ -92,16 +90,51 @@ export const ProfileManagePage: React.FC<ProfileManagePageProps> = ({
     setError('');
     setSuccessMsg('');
 
+    if (!profileName.trim()) {
+      setError('Please fill out Profile Name.');
+      setSaving(false);
+      return;
+    }
+
+    // Subject Credit Validation Rule:
+    let hasInvalidCreditSubject = false;
+    for (const sem of semesters) {
+      for (const sub of sem.subjects) {
+        const hasCode = Boolean((sub as any).subject_code && (sub as any).subject_code.trim());
+        const hasName = Boolean(sub.subject_name && sub.subject_name.trim());
+        if (hasCode || hasName) {
+          if (!sub.credit || Number(sub.credit) <= 0) {
+            hasInvalidCreditSubject = true;
+            break;
+          }
+        }
+      }
+      if (hasInvalidCreditSubject) break;
+    }
+
+    if (hasInvalidCreditSubject) {
+      setError('Credit is required for every subject or module.');
+      setSaving(false);
+      return;
+    }
+
+    // Filter non-empty subject rows
+    const cleanedSemesters = semesters.map((sem, idx) => ({
+      ...sem,
+      semester_name: sem.semester_name.trim() || `Semester ${idx + 1}`,
+      subjects: sem.subjects.filter(sub => (sub.subject_name.trim() || ((sub as any).subject_code && (sub as any).subject_code.trim())) && Number(sub.credit) > 0)
+    }));
+
     try {
       await updateProfile(profileId, passcode, {
-        profile_name: profileName,
-        university,
-        faculty,
-        degree,
-        academic_year: academicYear,
-        description,
+        profile_name: profileName.trim(),
+        university: university.trim(),
+        faculty: faculty.trim(),
+        degree: '',
+        academic_year: academicYear.trim(),
+        description: description.trim(),
         visibility,
-        semesters,
+        semesters: cleanedSemesters,
         gradingScale
       });
 
@@ -316,16 +349,6 @@ export const ProfileManagePage: React.FC<ProfileManagePageProps> = ({
               type="text"
               value={faculty}
               onChange={(e) => setFaculty(e.target.value)}
-              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-slate-700 block mb-1">Degree</label>
-            <input
-              type="text"
-              value={degree}
-              onChange={(e) => setDegree(e.target.value)}
               className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500"
             />
           </div>

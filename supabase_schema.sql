@@ -3,12 +3,17 @@
 -- Paste this script into your Supabase SQL Editor and click "Run"
 -- =============================================================
 
+-- Quick Migration for existing Supabase projects:
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS department TEXT DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_profiles_department ON public.profiles(department);
+
 -- 1. Profiles Table
 CREATE TABLE IF NOT EXISTS public.profiles (
   id TEXT PRIMARY KEY,
   profile_name TEXT NOT NULL,
   university TEXT NOT NULL,
   faculty TEXT NOT NULL,
+  department TEXT DEFAULT '',
   degree TEXT NOT NULL,
   academic_year TEXT DEFAULT '',
   description TEXT DEFAULT '',
@@ -17,6 +22,14 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Indexes for ultra-fast filtering
+CREATE INDEX IF NOT EXISTS idx_profiles_university ON public.profiles(university);
+CREATE INDEX IF NOT EXISTS idx_profiles_faculty ON public.profiles(faculty);
+CREATE INDEX IF NOT EXISTS idx_profiles_department ON public.profiles(department);
+CREATE INDEX IF NOT EXISTS idx_profiles_degree ON public.profiles(degree);
+CREATE INDEX IF NOT EXISTS idx_profiles_academic_year ON public.profiles(academic_year);
+CREATE INDEX IF NOT EXISTS idx_profiles_visibility ON public.profiles(visibility);
 
 -- 2. Semesters Table
 CREATE TABLE IF NOT EXISTS public.semesters (

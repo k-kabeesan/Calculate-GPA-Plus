@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Share2, Download, RotateCcw, Building, GraduationCap, Calendar, Lock, AlertCircle, FileText, Award } from 'lucide-react';
+import { Share2, Download, RotateCcw, Building, Calendar, Lock, AlertCircle, FileText, Award } from 'lucide-react';
 import type { Profile, Semester } from '../types';
 import { calculateProfileCGPA } from '../utils/gpa';
 import { generateAcademicPDF, getAcademicHonors } from '../utils/pdfGenerator';
 import { ShareModal } from '../components/ShareModal';
 import { fetchProfileById } from '../services/dbService';
+import { GpaProgressChart } from '../components/GpaProgressChart';
 
 interface ProfileViewerPageProps {
   profileId: string;
@@ -19,23 +20,18 @@ export const ProfileViewerPage: React.FC<ProfileViewerPageProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Local student grade state: { [semesterIndex]: { [subjectIndex]: "A" } }
-  // Stored locally in state (and cached in localStorage by profileId)
   const [selectedGrades, setSelectedGrades] = useState<{ [key: string]: string }>({});
   const [studentName, setStudentName] = useState('');
   const [studentId, setStudentId] = useState('');
 
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
 
-  // Fetch Profile Data
   useEffect(() => {
     setLoading(true);
     setError('');
     fetchProfileById(profileId)
       .then((data: Profile) => {
         setProfile(data);
-        
-        // Load saved session grades if present in localStorage
         const saved = localStorage.getItem(`gpa_viewer_grades_${profileId}`);
         if (saved) {
           try {
@@ -47,13 +43,10 @@ export const ProfileViewerPage: React.FC<ProfileViewerPageProps> = ({
       .finally(() => setLoading(false));
   }, [profileId]);
 
-  // Update grades for a specific subject
   const handleGradeChange = (semIdx: number, subIdx: number, gradeVal: string) => {
     const key = `${semIdx}_${subIdx}`;
     const updated = { ...selectedGrades, [key]: gradeVal };
     setSelectedGrades(updated);
-
-    // Save to local storage for user convenience (doesn't touch server)
     localStorage.setItem(`gpa_viewer_grades_${profileId}`, JSON.stringify(updated));
   };
 
@@ -62,28 +55,28 @@ export const ProfileViewerPage: React.FC<ProfileViewerPageProps> = ({
     localStorage.removeItem(`gpa_viewer_grades_${profileId}`);
   };
 
-  // Build active semester data with viewer's selected grades attached
   const activeSemestersWithGrades: Semester[] = useMemo(() => {
     if (!profile || !profile.semesters) return [];
 
     return profile.semesters.map((sem, semIdx) => ({
       ...sem,
-      subjects: sem.subjects.map((sub, subIdx) => ({
-        ...sub,
-        selectedGrade: selectedGrades[`${semIdx}_${subIdx}`] || ''
-      }))
+      subjects: (sem.subjects || []).map((sub, subIdx) => {
+        const key = `${semIdx}_${subIdx}`;
+        return {
+          ...sub,
+          selectedGrade: selectedGrades[key] || ''
+        };
+      })
     }));
   }, [profile, selectedGrades]);
 
-  // Compute live CGPA across all semesters
   const cgpaResult = useMemo(() => {
     if (!profile) return null;
     return calculateProfileCGPA(activeSemestersWithGrades, profile.gradingScale);
-  }, [profile, activeSemestersWithGrades]);
+  }, [activeSemestersWithGrades, profile]);
 
   const handleDownloadPDF = () => {
-    if (!profile || !cgpaResult) return;
-
+    if (!cgpaResult || !profile) return;
     generateAcademicPDF({
       title: 'ACADEMIC RESULTS REPORT',
       studentName: studentName.trim() || undefined,
@@ -92,7 +85,7 @@ export const ProfileViewerPage: React.FC<ProfileViewerPageProps> = ({
         profile_name: profile.profile_name,
         university: profile.university,
         faculty: profile.faculty,
-        degree: profile.degree,
+        department: profile.department,
         academic_year: profile.academic_year
       },
       cgpaResult
@@ -101,36 +94,33 @@ export const ProfileViewerPage: React.FC<ProfileViewerPageProps> = ({
 
   if (loading) {
     return (
-      <div className="max-w-4xl mx-auto py-16 text-center space-y-4">
-        <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto" />
-        <p className="text-slate-600 font-semibold text-sm">Loading Academic Profile ({profileId})...</p>
+      <div className="py-24 text-center space-y-3">
+        <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto" />
+        <p className="text-sm font-semibold text-slate-600">Loading profile data...</p>
       </div>
     );
   }
 
   if (error || !profile) {
     return (
-      <div className="max-w-xl mx-auto py-16 px-4 text-center space-y-6">
-        <div className="p-4 bg-red-50 text-red-700 rounded-2xl border border-red-200 space-y-2">
-          <AlertCircle className="w-8 h-8 text-red-600 mx-auto" />
-          <h2 className="text-lg font-bold">Profile Not Found</h2>
-          <p className="text-xs text-red-600">{error || 'Unable to retrieve profile details.'}</p>
+      <div className="max-w-md mx-auto py-16 px-4 text-center space-y-4">
+        <div className="p-4 bg-red-50 text-red-700 text-xs font-semibold rounded-2xl border border-red-200 flex items-center justify-center space-x-2">
+          <AlertCircle className="w-5 h-5 shrink-0" />
+          <span>{error || 'Profile not found.'}</span>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-6xl mx-auto py-8 px-4 sm:px-6 space-y-8 animate-fade-in">
-      {/* Profile Academic Banner Card */}
-      <div className="bg-slate-900 text-white rounded-3xl p-6 sm:p-8 border border-slate-800 shadow-xl space-y-6 relative overflow-hidden">
-        <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
-          <GraduationCap className="w-48 h-48" />
-        </div>
+    <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-8 animate-fade-in">
+      {/* Profile Header Banner */}
+      <div className="bg-slate-900 text-white rounded-3xl p-6 sm:p-8 border border-slate-800 shadow-xl relative overflow-hidden space-y-6">
+        <div className="absolute top-0 right-0 -mt-12 -mr-12 w-96 h-96 bg-gradient-to-br from-indigo-500/20 via-purple-500/10 to-transparent rounded-full blur-3xl pointer-events-none" />
 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
           <div className="space-y-2">
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2 flex-wrap gap-y-1">
               <span className="px-3 py-1 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-lg text-xs font-mono font-bold">
                 Profile ID: {profile.id}
               </span>
@@ -149,7 +139,10 @@ export const ProfileViewerPage: React.FC<ProfileViewerPageProps> = ({
                 <Building className="w-4 h-4 text-indigo-400 shrink-0" />
                 <span>{profile.university}</span>
               </p>
-              <p className="text-slate-400 pl-6">{profile.faculty} • Degree: {profile.degree}</p>
+              <p className="text-slate-400 pl-6">
+                {profile.faculty}
+                {profile.department ? ` • ${profile.department}` : ''}
+              </p>
             </div>
           </div>
 
@@ -313,6 +306,11 @@ export const ProfileViewerPage: React.FC<ProfileViewerPageProps> = ({
               </div>
             )}
           </div>
+
+          {/* GPA History Progress Chart for Multi-Semester profiles */}
+          {cgpaResult && cgpaResult.semesterResults.length > 0 && (
+            <GpaProgressChart semesterResults={cgpaResult.semesterResults} />
+          )}
 
           {/* PDF Personalization & Export Card */}
           <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-4">

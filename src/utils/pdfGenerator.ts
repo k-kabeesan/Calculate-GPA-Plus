@@ -36,8 +36,8 @@ export function generateAcademicPDF({
   let startY = 28;
 
   const displayName = studentName.trim() || 'Student';
-  const degreeName = profile?.degree || profile?.profile_name || 'Degree Programme';
-  const academicYear = profile?.academic_year || '2024/2025';
+  const profileName = profile?.profile_name || 'Academic Profile';
+  const academicYear = profile?.academic_year || 'N/A';
   
   const semesterNames = cgpaResult.semesterResults
     .map(s => s.semester_name)
@@ -58,7 +58,7 @@ export function generateAcademicPDF({
 
   doc.text(`Student Name: ${displayName}`, 14, startY);
   startY += 6;
-  doc.text(`Course / Degree Name: ${degreeName}`, 14, startY);
+  doc.text(`Profile Name: ${profileName}`, 14, startY);
   startY += 6;
   doc.text(`Academic Year: ${academicYear}`, 14, startY);
   startY += 6;

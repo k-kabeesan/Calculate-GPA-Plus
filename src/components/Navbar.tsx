@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
-import { Calculator, PlusCircle, Search, Menu, X } from 'lucide-react';
+import { Calculator, PlusCircle, Search, Sparkles, Menu, X } from 'lucide-react';
 import { Logo } from './Logo';
 
 interface NavbarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
-  openSearchModal: (query?: string) => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, openSearchModal }) => {
+export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const handleNav = (tab: string) => {
@@ -56,7 +55,29 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, openSea
               }`}
             >
               <PlusCircle className="w-4 h-4" />
-              <span>Create Shared Profile</span>
+              <span>Create Profile</span>
+            </button>
+            <button
+              onClick={() => handleNav('ai')}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-1.5 ${
+                activeTab === 'ai'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <span>AI Generator</span>
+            </button>
+            <button
+              onClick={() => handleNav('search')}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors flex items-center space-x-1.5 ${
+                activeTab === 'search'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <Search className="w-4 h-4" />
+              <span>Search Profiles</span>
             </button>
             <button
               onClick={() => handleNav('about')}
@@ -70,23 +91,11 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, openSea
             </button>
           </div>
 
-          {/* Quick Search trigger button */}
-          <div className="hidden sm:flex items-center space-x-2">
-            <button
-              onClick={() => openSearchModal()}
-              className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-xs font-medium flex items-center space-x-2 transition-all shadow-inner"
-            >
-              <Search className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Search profile by name...</span>
-              <kbd className="bg-slate-900 px-1.5 py-0.5 text-[10px] text-slate-400 rounded border border-slate-700">⌘K</kbd>
-            </button>
-          </div>
-
           {/* Mobile menu button */}
           <div className="md:hidden flex items-center">
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 focus:outline-none"
             >
               {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>
@@ -121,7 +130,25 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, openSea
             }`}
           >
             <PlusCircle className="w-5 h-5" />
-            <span>Create Shared Profile</span>
+            <span>Create Profile</span>
+          </button>
+          <button
+            onClick={() => handleNav('ai')}
+            className={`w-full text-left px-4 py-2.5 rounded-lg text-base font-medium flex items-center space-x-2 ${
+              activeTab === 'ai' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-800'
+            }`}
+          >
+            <Sparkles className="w-5 h-5 text-amber-400" />
+            <span>AI Profile Generator</span>
+          </button>
+          <button
+            onClick={() => handleNav('search')}
+            className={`w-full text-left px-4 py-2.5 rounded-lg text-base font-medium flex items-center space-x-2 ${
+              activeTab === 'search' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-800'
+            }`}
+          >
+            <Search className="w-5 h-5" />
+            <span>Search Profiles</span>
           </button>
           <button
             onClick={() => handleNav('about')}

@@ -22,11 +22,11 @@ export interface Semester {
 export interface Profile {
   id: string;
   profile_name: string;
-  university: string;
-  faculty: string;
-  degree: string;
-  academic_year: string;
-  description: string;
+  university?: string;
+  faculty?: string;
+  department?: string;
+  academic_year?: string;
+  description?: string;
   visibility: 'public' | 'private' | 'shared';
   has_passcode?: boolean;
   created_at?: string;
