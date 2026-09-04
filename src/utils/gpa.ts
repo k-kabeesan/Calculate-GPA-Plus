@@ -34,7 +34,7 @@ export function calculateSemesterGPA(subjects: Subject[], scale: GradeOption[] =
   const calculations: SubjectCalculation[] = [];
 
   for (const sub of subjects) {
-    if (!sub.selectedGrade || sub.credit <= 0) continue;
+    if (!sub.selectedGrade || sub.credit === undefined || sub.credit === null || sub.credit === ('' as any) || isNaN(Number(sub.credit)) || Number(sub.credit) < 0) continue;
 
     const gp = getGradePoint(sub.selectedGrade, scale);
     const credit = Number(sub.credit) || 0;

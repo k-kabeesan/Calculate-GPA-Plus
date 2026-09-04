@@ -6,6 +6,7 @@ import { generateAcademicPDF, getAcademicHonors } from '../utils/pdfGenerator';
 import { ShareModal } from '../components/ShareModal';
 import { fetchProfileById } from '../services/dbService';
 import { GpaProgressChart } from '../components/GpaProgressChart';
+import { GpaInsights } from '../components/GpaInsights';
 
 interface ProfileViewerPageProps {
   profileId: string;
@@ -74,6 +75,11 @@ export const ProfileViewerPage: React.FC<ProfileViewerPageProps> = ({
     if (!profile) return null;
     return calculateProfileCGPA(activeSemestersWithGrades, profile.gradingScale);
   }, [activeSemestersWithGrades, profile]);
+
+  const allCalculations = useMemo(() => {
+    if (!cgpaResult) return [];
+    return cgpaResult.semesterResults.flatMap(sr => sr.calculations).filter(c => Boolean(c.grade && c.grade.trim()));
+  }, [cgpaResult]);
 
   const handleDownloadPDF = () => {
     if (!cgpaResult || !profile) return;
@@ -346,6 +352,15 @@ export const ProfileViewerPage: React.FC<ProfileViewerPageProps> = ({
           </div>
         </div>
       </div>
+
+      {/* GPA Insights & Target GPA Calculator */}
+      {cgpaResult && allCalculations.length > 0 && (
+        <GpaInsights
+          currentGpa={cgpaResult.overall_cgpa}
+          totalCredits={cgpaResult.overall_credits}
+          calculations={allCalculations}
+        />
+      )}
 
       {/* Share Modal */}
       <ShareModal

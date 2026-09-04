@@ -94,8 +94,11 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
           {/* Mobile menu button */}
           <div className="md:hidden flex items-center">
             <button
+              type="button"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 focus:outline-none"
+              aria-expanded={mobileMenuOpen}
+              aria-label={mobileMenuOpen ? "Close navigation menu" : "Open navigation menu"}
+              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
             >
               {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>
@@ -105,8 +108,9 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
 
       {/* Mobile Drawer Menu */}
       {mobileMenuOpen && (
-        <div className="md:hidden bg-slate-950 border-b border-slate-800 px-4 pt-2 pb-4 space-y-2 animate-fade-in">
+        <div className="md:hidden bg-slate-950 border-b border-slate-800 px-4 pt-2 pb-4 space-y-2 animate-fade-in" role="menu">
           <button
+            type="button"
             onClick={() => handleNav('home')}
             className={`w-full text-left px-4 py-2.5 rounded-lg text-base font-medium ${
               activeTab === 'home' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-800'
@@ -115,6 +119,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
             Home
           </button>
           <button
+            type="button"
             onClick={() => handleNav('normal')}
             className={`w-full text-left px-4 py-2.5 rounded-lg text-base font-medium flex items-center space-x-2 ${
               activeTab === 'normal' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-800'
@@ -124,6 +129,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
             <span>Normal Calculator</span>
           </button>
           <button
+            type="button"
             onClick={() => handleNav('create')}
             className={`w-full text-left px-4 py-2.5 rounded-lg text-base font-medium flex items-center space-x-2 ${
               activeTab === 'create' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-800'
@@ -133,6 +139,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
             <span>Create Profile</span>
           </button>
           <button
+            type="button"
             onClick={() => handleNav('ai')}
             className={`w-full text-left px-4 py-2.5 rounded-lg text-base font-medium flex items-center space-x-2 ${
               activeTab === 'ai' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-800'
@@ -142,6 +149,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
             <span>AI Profile Generator</span>
           </button>
           <button
+            type="button"
             onClick={() => handleNav('search')}
             className={`w-full text-left px-4 py-2.5 rounded-lg text-base font-medium flex items-center space-x-2 ${
               activeTab === 'search' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-800'
@@ -151,12 +159,22 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
             <span>Search Profiles</span>
           </button>
           <button
+            type="button"
             onClick={() => handleNav('about')}
             className={`w-full text-left px-4 py-2.5 rounded-lg text-base font-medium ${
               activeTab === 'about' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-800'
             }`}
           >
             About
+          </button>
+          <button
+            type="button"
+            onClick={() => handleNav('privacy')}
+            className={`w-full text-left px-4 py-2.5 rounded-lg text-base font-medium text-slate-300 hover:bg-slate-800 ${
+              activeTab === 'privacy' ? 'bg-indigo-600 text-white' : ''
+            }`}
+          >
+            Privacy Policy
           </button>
         </div>
       )}

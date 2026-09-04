@@ -9,10 +9,11 @@ import { ProfileViewerPage } from './pages/ProfileViewerPage';
 import { ProfileManagePage } from './pages/ProfileManagePage';
 import { SearchProfilesPage } from './pages/SearchProfilesPage';
 import { AboutPage } from './pages/AboutPage';
+import { PrivacyPage } from './pages/PrivacyPage';
 import type { Subject } from './types';
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<'home' | 'normal' | 'create' | 'ai' | 'search' | 'viewer' | 'manage' | 'about'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'normal' | 'create' | 'ai' | 'search' | 'viewer' | 'manage' | 'about' | 'privacy'>('home');
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
 
   // State passed from normal calculator when user clicks "Save as Shared Profile"
@@ -38,6 +39,10 @@ export function App() {
         setActiveTab('ai');
       } else if (hash === '#search') {
         setActiveTab('search');
+      } else if (hash === '#privacy') {
+        setActiveTab('privacy');
+      } else if (hash === '#about') {
+        setActiveTab('about');
       }
     };
 
@@ -123,10 +128,14 @@ export function App() {
         )}
 
         {activeTab === 'about' && <AboutPage />}
+
+        {activeTab === 'privacy' && (
+          <PrivacyPage onNavigateHome={() => handleNavigate('home')} />
+        )}
       </main>
 
       {/* Footer */}
-      <Footer />
+      <Footer onNavigate={(page) => handleNavigate(page)} />
     </div>
   );
 }

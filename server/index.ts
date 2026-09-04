@@ -44,18 +44,37 @@ const DEFAULT_GRADING_SCALE = [
 
 
 
+// Clean extracted subject names automatically
+function cleanSubjectTitle(rawTitle: string): string {
+  if (!rawTitle) return '';
+  let title = rawTitle
+    .replace(/\b(?:Room|Lab|LH|Venue|Hall|Building)\s*[-:\s]?\s*[A-Z0-9]+/gi, '')
+    .replace(/\b\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?\b/g, '')
+    .replace(/\b(?:by\s+)?(?:Dr\.|Prof\.|Professor|Mr\.|Ms\.)\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*/gi, '')
+    .replace(/\b\d+(?:\.\d+)?\s*(?:credits?|cr|pts?|credit hours?|c\.h\.)\b/gi, '')
+    .replace(/[\(\[\{]\s*(?:credit[s]?|cr|pts?|units?)?\s*[\)\]\}]/gi, '')
+    .replace(/^[\s\-–—:•*#|.]+/, '')
+    .replace(/[\s\-–—:•*#|.]+$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Strip trailing hyphens, dashes, colons, extra spaces, or duplicate punctuation
+  title = title.replace(/[\s\-–—:;,\.]*$/, '').trim();
+  return title;
+}
+
 // Fallback NLP Extractor Function when AI API key is omitted or service is unavailable
 function extractProfileFallback(inputText: string) {
   const lines = inputText.split('\n').map(l => l.trim()).filter(Boolean);
   
-  let profile_name = '';
-  let university = 'Not detected';
-  let faculty = 'Not detected';
-  let department = 'Not detected';
-  let academic_year = 'Not detected';
-  let semesterName = 'Not detected';
+  let profileName = '';
+  let university = '';
+  let faculty = '';
+  let department = '';
+  let academicYear = '';
+  let semester = '';
 
-  const extractedSubjects: Array<{ subject_code: string; subject_name: string; credit: number | null }> = [];
+  const subjects: Array<{ moduleNumber: string; subjectName: string; credit: number | null }> = [];
 
   for (const line of lines) {
     // Skip lecturer, staff, room, time, contact, or page number lines
@@ -69,7 +88,7 @@ function extractProfileFallback(inputText: string) {
     // 1. Explicit / Labelled Metadata Detection
     if (/^(?:PROFILE\s*NAME|PROFILE)\s*:\s*(.+)/i.test(line)) {
       const match = line.match(/^(?:PROFILE\s*NAME|PROFILE)\s*:\s*(.+)/i);
-      if (match && match[1]) profile_name = match[1].trim();
+      if (match && match[1]) profileName = match[1].trim();
       continue;
     }
     if (/^(?:UNIVERSITY|UNI|INSTITUTION)\s*:\s*(.+)/i.test(line)) {
@@ -89,137 +108,130 @@ function extractProfileFallback(inputText: string) {
     }
     if (/^(?:ACADEMIC\s*YEAR|YEAR|BATCH)\s*:\s*(.+)/i.test(line)) {
       const match = line.match(/^(?:ACADEMIC\s*YEAR|YEAR|BATCH)\s*:\s*(.+)/i);
-      if (match && match[1]) academic_year = match[1].trim();
+      if (match && match[1]) academicYear = match[1].trim();
       continue;
     }
     if (/^(?:SEMESTER|TERM)\s*:\s*(.+)/i.test(line)) {
       const match = line.match(/^(?:SEMESTER|TERM)\s*:\s*(.+)/i);
-      if (match && match[1]) semesterName = match[1].startsWith('Semester') ? match[1].trim() : `Semester ${match[1].trim()}`;
+      if (match && match[1]) semester = match[1].toLowerCase().startsWith('semester') ? match[1].trim() : `Semester ${match[1].trim()}`;
       continue;
     }
 
     // 2. Unlabelled Header Heuristics (Do NOT convert headings to subjects)
-    if (university === 'Not detected' && /^(?:University|Institute|College|Academy)\b/i.test(line)) {
+    if (!university && /^(?:University|Institute|College|Academy)\b/i.test(line)) {
       university = line.trim();
       continue;
     }
-    if (faculty === 'Not detected' && /^(?:Faculty|School)\s+of\b/i.test(line)) {
+    if (!faculty && /^(?:Faculty|School)\s+of\b/i.test(line)) {
       faculty = line.trim();
       continue;
     }
-    if (department === 'Not detected' && /^(?:Department|Dept\.)\s+of\b/i.test(line)) {
+    if (!department && /^(?:Department|Dept\.)\s+of\b/i.test(line)) {
       department = line.trim();
       continue;
     }
-    if (academic_year === 'Not detected' && /\b(20\d{2}[-/]20\d{2}|Year\s+[1-5]|Academic\s+Year\s+\d+)\b/i.test(line)) {
+    if (!academicYear && /\b(20\d{2}[-/]20\d{2}|Year\s+[1-5]|Academic\s+Year\s+\d+)\b/i.test(line)) {
       const match = line.match(/\b(20\d{2}[-/]20\d{2}|Year\s+[1-5]|Academic\s+Year\s+\d+)\b/i);
-      if (match) academic_year = match[1].trim();
+      if (match) academicYear = match[1].trim();
       continue;
     }
-    if (semesterName === 'Not detected' && /\b(Semester\s+[1-8]|Sem\s+[1-8]|Term\s+[1-4])\b/i.test(line)) {
+    if (!semester && /\b(Semester\s+[1-8]|Sem\s+[1-8]|Term\s+[1-4])\b/i.test(line)) {
       const match = line.match(/\b(Semester\s+[1-8]|Sem\s+[1-8]|Term\s+[1-4])\b/i);
-      if (match) semesterName = match[1].trim();
+      if (match) semester = match[1].trim();
       continue;
     }
 
     // Skip section headers, titles, or notes
-    if (/^(?:SUBJECTS|MODULES|COURSES|INSTRUCTIONS?|NOTES?|TIMETABLE|RESULTS?|GRADES?|SYLLABUS|COURSE OUTLINE|MODULE LIST|SL\.\s*NO|SR\.\s*NO)\s*:?$/i.test(line)) {
+    if (/^(?:SUBJECTS|MODULES|COURSES|INSTRUCTIONS?|NOTES?|TIMETABLE|RESULTS?|GRADES?|SYLLABUS|COURSE OUTLINE|MODULE LIST|SL\.\s*NO|SR\.\s*NO|MODULE CODE|SUBJECT NAME|CREDITS?)\s*:?$/i.test(line)) {
       continue;
     }
 
     // 3. Subject Extraction Rule
     const codeMatch = line.match(/^([A-Z]{2,6}\s*[-–—]?\s*\d{3,5}[A-Z]?)\b\s*[-–—:|]?\s*(.*)$/i);
-    let subjectCode = '';
+    let moduleNumber = '';
     let remainingLine = '';
 
     if (codeMatch) {
-      subjectCode = codeMatch[1].replace(/\s+/g, '').toUpperCase();
+      moduleNumber = codeMatch[1].replace(/\s+/g, '').toUpperCase();
       remainingLine = codeMatch[2].trim();
     } else {
-      const parts = line.split(/[-–—|]/).map(p => p.trim()).filter(Boolean);
-      if (parts.length >= 2) {
-        if (/^[A-Z]{2,6}\s*\d{3,5}[A-Z]?$/i.test(parts[0])) {
-          subjectCode = parts[0].replace(/\s+/g, '').toUpperCase();
-          remainingLine = parts.slice(1).join(' - ');
-        }
+      const inlineCodeMatch = line.match(/\b([A-Z]{2,6}\s*[-–—]?\s*\d{3,5}[A-Z]?)\b/i);
+      if (inlineCodeMatch) {
+        moduleNumber = inlineCodeMatch[1].replace(/\s+/g, '').toUpperCase();
+        remainingLine = line.replace(inlineCodeMatch[0], '').replace(/^[-–—:|]+/, '').trim();
       }
     }
 
-    if (subjectCode || (remainingLine && !/^(?:University|Faculty|Department|Semester|Academic Year|Grade|Point|Marks|Total|GPA|CGPA|Credit|Lecturer|Dr\.|Prof\.)/i.test(line))) {
+    if (moduleNumber || (remainingLine && !/^(?:University|Faculty|Department|Semester|Academic Year|Grade|Point|Marks|Total|GPA|CGPA|Credit|Lecturer|Dr\.|Prof\.)/i.test(line))) {
       let credit: number | null = null;
       let subjectTitle = remainingLine || line;
 
       // Strip lecturer names, rooms, or times trailing in the subject title
-      subjectTitle = subjectTitle
-        .replace(/\b(?:by\s+)?(?:Dr\.|Prof\.|Professor|Mr\.|Ms\.)\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*/gi, '')
-        .replace(/\b(?:Room|Lab|LH|Venue|Hall)\s*[-:\s]?\s*[A-Z0-9]+/gi, '')
-        .replace(/\b\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?\b/g, '')
-        .trim();
+      subjectTitle = cleanSubjectTitle(subjectTitle);
 
       // Explicit credit regex matching (supports 0, 0.5, 1, 2, 3, 4, etc.)
+      const explicitCreditMatch = subjectTitle.match(/(?:^|[-–—:|,\s])(\d+(?:\.\d+)?)\s*(?:credits?|cr|pts?|credit hours?|c\.h\.)(?:$|[\)\s])/i);
       const trailingCreditMatch = subjectTitle.match(/[-–—:|]?\s*(\d+(?:\.\d+)?)\s*(?:credits?|cr|pts?)?\s*$/i);
-      const explicitCreditMatch = subjectTitle.match(/(?:^|[-–—:|,\s])(\d+(?:\.\d+)?)\s*(?:credits?|cr|pts?|credit hours?|c\.h\.)?(?:$|[\)\s])/i);
 
-      if (trailingCreditMatch && trailingCreditMatch[1] !== undefined) {
+      if (explicitCreditMatch && explicitCreditMatch[1] !== undefined) {
+        const val = parseFloat(explicitCreditMatch[1]);
+        if (!isNaN(val) && val >= 0 && val <= 12) {
+          credit = val;
+        }
+      } else if (trailingCreditMatch && trailingCreditMatch[1] !== undefined && /(?:credits?|cr|pts?)/i.test(line)) {
         const val = parseFloat(trailingCreditMatch[1]);
         if (!isNaN(val) && val >= 0 && val <= 12) {
           credit = val;
           subjectTitle = subjectTitle.substring(0, trailingCreditMatch.index).trim();
         }
-      } else if (explicitCreditMatch && explicitCreditMatch[1] !== undefined) {
-        const val = parseFloat(explicitCreditMatch[1]);
-        if (!isNaN(val) && val >= 0 && val <= 12) {
-          credit = val;
+      }
+
+      // Requirement: Use the last digit of the module number as credit if not explicitly set
+      if (credit === null && moduleNumber) {
+        const digits = moduleNumber.match(/\d/g);
+        if (digits && digits.length > 0) {
+          const lastDigitVal = parseInt(digits[digits.length - 1], 10);
+          if (!isNaN(lastDigitVal)) {
+            credit = lastDigitVal;
+          }
         }
       }
 
-      subjectTitle = subjectTitle
-        .replace(/^[-–—:|]+/, '')
-        .replace(/[-–—:|]+$/, '')
-        .replace(/\b\d+(?:\.\d+)?\s*(?:credits?|cr|pts?)\b/gi, '')
-        .trim();
+      subjectTitle = cleanSubjectTitle(subjectTitle);
 
-      if (!subjectTitle && subjectCode) {
-        subjectTitle = subjectCode;
+      if (!subjectTitle && moduleNumber) {
+        subjectTitle = moduleNumber;
       }
 
-      if (subjectTitle || subjectCode) {
-        extractedSubjects.push({
-          subject_code: subjectCode,
-          subject_name: subjectTitle,
+      if (subjectTitle || moduleNumber) {
+        subjects.push({
+          moduleNumber: moduleNumber,
+          subjectName: subjectTitle,
           credit: credit // null if missing/unspecified; 0 if explicitly 0
         });
       }
     }
   }
 
-  if (!profile_name) {
-    if (university !== 'Not detected') {
-      profile_name = `${university}${academic_year !== 'Not detected' ? ' - ' + academic_year : ''}`;
-    } else {
-      profile_name = 'Academic Profile';
-    }
-  }
-
+  // Requirement 7: Only use an explicitly detected profile name.
+  // If no profile name is detected, leave it empty.
   return {
-    profile_name,
+    profileName,
     university,
     faculty,
     department,
-    academic_year,
-    semester: semesterName,
-    semesters: [
-      {
-        semester_name: semesterName !== 'Not detected' ? semesterName : 'Semester 1',
-        subjects: extractedSubjects
-      }
-    ]
+    academicYear,
+    semester,
+    subjects
   };
 }
 
 function cleanAndParseJson(text: string): any {
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    throw new Error('Empty AI response content');
+  }
   let cleaned = text.trim();
-  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  cleaned = cleaned.replace(/^```(?:json)?\s*/gi, '').replace(/\s*```$/gi, '').trim();
   const firstBrace = cleaned.indexOf('{');
   const lastBrace = cleaned.lastIndexOf('}');
   if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
@@ -228,114 +240,220 @@ function cleanAndParseJson(text: string): any {
   return JSON.parse(cleaned);
 }
 
-// POST /api/ai/extract-profile - AI extraction endpoint (Supports Text & Base64 Image Vision)
-app.post('/api/ai/extract-profile', async (req: Request, res: Response) => {
-  try {
-    const { text, image } = req.body;
-    if ((!text || typeof text !== 'string' || !text.trim()) && !image) {
-      return res.status(400).json({ error: 'Syllabus/course text or image payload is required.' });
+function normalizeAiProfileOutput(raw: any) {
+  if (!raw || typeof raw !== 'object') {
+    raw = {};
+  }
+  let profileName = raw.profileName || raw.profile_name || '';
+  if (
+    profileName === 'Not detected' ||
+    /Academic Profile/i.test(profileName) ||
+    /Semester\s*\d+/i.test(profileName) ||
+    /University/i.test(profileName) ||
+    /Faculty/i.test(profileName) ||
+    /Department/i.test(profileName) ||
+    /Bachelor|BSc|MSc|Master|Degree|Diploma/i.test(profileName)
+  ) {
+    profileName = '';
+  }
+
+  let university = raw.university === 'Not detected' ? '' : (raw.university || '');
+  let faculty = raw.faculty === 'Not detected' ? '' : (raw.faculty || '');
+  let department = raw.department === 'Not detected' ? '' : (raw.department || '');
+  let academicYear = raw.academicYear || raw.academic_year || '';
+  if (academicYear === 'Not detected') academicYear = '';
+
+  let semester = raw.semester || '';
+  if (semester === 'Not detected') semester = '';
+
+  let subjects: Array<{ moduleNumber: string; subjectName: string; credit: number | null }> = [];
+
+  const extractSubjectObj = (s: any) => {
+    const mod = (s.moduleNumber || s.subject_code || s.code || '').trim();
+    let name = cleanSubjectTitle((s.subjectName || s.subject_name || s.name || mod || '').trim());
+
+    let cr: number | null = null;
+    if (s.credit !== null && s.credit !== undefined && s.credit !== '' && !isNaN(Number(s.credit))) {
+      cr = Number(s.credit);
+    } else if (mod) {
+      const digits = mod.match(/\d/g);
+      if (digits && digits.length > 0) {
+        const lastDigitVal = parseInt(digits[digits.length - 1], 10);
+        if (!isNaN(lastDigitVal)) cr = lastDigitVal;
+      }
     }
 
-    const apiKey = process.env.AI_API_KEY || '';
-    const model = process.env.AI_MODEL || 'llama-3.1-8b-instant';
-    const apiUrl = process.env.AI_API_URL || 'https://api.groq.com/openai/v1/chat/completions';
+    return {
+      moduleNumber: mod === 'Not detected' ? '' : mod,
+      subjectName: name === 'Not detected' ? '' : name,
+      credit: cr
+    };
+  };
 
-    if (apiKey && apiKey.trim()) {
-      const systemPrompt = `You are a strict academic curriculum & OCR extractor.
-Analyze the user's text or image document and extract profile details and subject modules ONLY.
-You MUST intelligently distinguish and extract:
-University -> Faculty -> Department -> Academic Year -> Semester -> Subject -> Module Number -> Credit
+  if (Array.isArray(raw.subjects)) {
+    subjects = raw.subjects.map(extractSubjectObj).filter((s: any) => s.moduleNumber || s.subjectName);
+  } else if (Array.isArray(raw.semesters)) {
+    raw.semesters.forEach((sem: any) => {
+      if (!semester && sem.semester_name) {
+        semester = sem.semester_name;
+      }
+      if (Array.isArray(sem.subjects)) {
+        sem.subjects.forEach((s: any) => {
+          const extractedSub = extractSubjectObj(s);
+          if (extractedSub.moduleNumber || extractedSub.subjectName) {
+            subjects.push(extractedSub);
+          }
+        });
+      }
+    });
+  }
 
-Output ONLY valid JSON matching this schema:
+  return {
+    profileName,
+    university,
+    faculty,
+    department,
+    academicYear,
+    semester,
+    subjects
+  };
+}
+
+// POST /api/ai/extract-profile - Vision AI extraction endpoint via OpenRouter (Supports Image Vision & Text)
+app.post('/api/ai/extract-profile', async (req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+
+  try {
+    const { text, image } = req.body || {};
+    if ((!text || typeof text !== 'string' || !text.trim()) && !image) {
+      return res.status(400).json({
+        success: false,
+        error: image ? 'Unable to analyze the image. Please try again.' : 'Syllabus/course text or image payload is required.'
+      });
+    }
+
+    const openrouterApiKey = process.env.OPENROUTER_API_KEY || process.env.AI_API_KEY || '';
+    const visionModel = process.env.OPENROUTER_VISION_MODEL || process.env.AI_VISION_MODEL || process.env.AI_MODEL || 'google/gemini-2.0-flash-001';
+    const apiUrl = process.env.OPENROUTER_API_URL || process.env.AI_API_URL || 'https://openrouter.ai/api/v1/chat/completions';
+
+    if (openrouterApiKey && openrouterApiKey.trim()) {
+      const systemPrompt = `You are a high-precision academic document vision extraction system.
+Analyze the user's document image or text and extract academic profile details and subject modules ONLY.
+
+You MUST output ONLY a single raw JSON object matching this EXACT structure:
 {
-  "profile_name": "string",
+  "profileName": "string",
   "university": "string",
   "faculty": "string",
   "department": "string",
-  "degree": "string",
-  "academic_year": "string",
+  "academicYear": "string",
   "semester": "string",
-  "semesters": [
+  "subjects": [
     {
-      "semester_name": "string",
-      "subjects": [
-        {
-          "subject_code": "string",
-          "subject_name": "string",
-          "credit": 0
-        }
-      ]
+      "moduleNumber": "string",
+      "subjectName": "string",
+      "credit": 0
     }
   ]
 }
 
 STRICT MANDATORY RULES:
-1. ZERO CREDIT IS VALID: 0 is a completely valid credit value (e.g. "PDEV2110 - Career Development - 0" -> "credit": 0). Do NOT change 0 credit to null or 1!
-2. SUBJECTS ONLY: Extract ONLY academic course/module entries.
-   - NEVER extract lecturer names, instructor names, staff names (e.g., "Dr. Smith", "Prof. Perera").
-   - NEVER create subjects from contact info, emails, room numbers (e.g., "LH-2", "Lab 1"), class times ("8:00 AM"), dates, or notes.
-   - Do NOT include lecturer names in subject titles!
-3. ACCURACY OVER COMPLETENESS: Prioritize accuracy over extracting everything visible in the image. If uncertain whether text is a subject, do NOT add it as a subject.
-4. CREDIT DETECTION:
-   - If credit is explicitly stated (including 0), set "credit": <number>.
-   - If credit is NOT explicitly stated at all in text/image, set "credit": null.
-5. Output JSON ONLY.`;
+1. OUTPUT JSON ONLY. Do NOT wrap in markdown code blocks (\`\`\`json). Do NOT add any explanations, introductions, or trailing text before or after the JSON.
+2. PROFILE NAME: Only set profileName if an explicit profile name label is written on the document (e.g. "PROFILE NAME: ..."). Otherwise, set "profileName": "". Do NOT use university, faculty, department, semester, degree name, or subject name as profileName.
+3. SUBJECT EXTRACTION:
+   - Extract ONLY actual academic subjects / courses / modules.
+   - NEVER extract lecturer names, professor names, instructor names, staff names, contact details, email addresses, phone numbers, room numbers, building names, lab names, class times, dates, page numbers, decorative text, logos, or generic table headings as subjects.
+   - Do NOT include lecturer names in subject titles! If a line says "NANO2112 Mathematics for Nano Science - Dr. Smith", extract subjectName as "Mathematics for Nano Science".
+4. CREDIT EXTRACTION & PRIORITY:
+   - Priority 1: If explicit credit is stated in text (e.g. "3 Credits", "(2 Cr)"), use that exact numeric credit.
+   - Priority 2: If explicit credit is missing, use the LAST DIGIT of the module number as the credit value (e.g., NANO2112 -> 2, NANO2151 -> 1, NANO2162 -> 2, ETCH2111 -> 1, ETCH1210 -> 0, PDEV1210 -> 0).
+   - ZERO CREDIT IS VALID: 0 is a completely valid credit value. Never convert 0 to null, 1, or "Not Detected".
+   - If credit cannot be determined, set "credit": null.
+5. PRESERVE MODULE NUMBERS: Preserve complete module numbers exactly as written.`;
 
-      try {
-        let messagesPayload: any[] = [{ role: 'system', content: systemPrompt }];
+      let messagesPayload: any[] = [{ role: 'system', content: systemPrompt }];
 
-        if (image) {
-          messagesPayload.push({
-            role: 'user',
-            content: [
-              { type: 'text', text: 'Extract academic profile metadata and subject list from this university document image.' },
-              { type: 'image_url', image_url: { url: image } }
-            ]
-          });
-        } else {
-          messagesPayload.push({ role: 'user', content: text });
+      if (image) {
+        let formattedImageUrl = image;
+        if (typeof image === 'string' && !image.startsWith('data:')) {
+          formattedImageUrl = `data:image/jpeg;base64,${image}`;
         }
-
-        const aiResponse = await fetch(apiUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            model: model,
-            messages: messagesPayload,
-            temperature: 0.1
-          })
+        messagesPayload.push({
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Extract academic profile metadata and subject list from this university document image.' },
+            { type: 'image_url', image_url: { url: formattedImageUrl } }
+          ]
         });
+      } else {
+        messagesPayload.push({ role: 'user', content: text });
+      }
 
-        if (aiResponse.ok) {
-          const data: any = await aiResponse.json();
-          const content = data.choices?.[0]?.message?.content;
-          if (content) {
-            const parsed = cleanAndParseJson(content);
-            return res.json({ success: true, profile: parsed, method: image ? 'ai_vision' : 'ai' });
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openrouterApiKey.trim()}`,
+        'HTTP-Referer': 'https://gpa-calculator.local',
+        'X-Title': 'GPA Calculator Vision Extractor'
+      };
+
+      // Retry mechanism (Up to 2 attempts if AI API fails or returns malformed response)
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const aiResponse = await fetch(apiUrl, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({
+              model: visionModel,
+              messages: messagesPayload,
+              temperature: 0.1,
+              response_format: { type: 'json_object' }
+            })
+          });
+
+          if (aiResponse.ok) {
+            const data: any = await aiResponse.json();
+            const content = data.choices?.[0]?.message?.content;
+            if (content) {
+              const parsed = cleanAndParseJson(content);
+              if (parsed && typeof parsed === 'object') {
+                const normalized = normalizeAiProfileOutput(parsed);
+                if (normalized && normalized.subjects && normalized.subjects.length > 0) {
+                  return res.json({ success: true, profile: normalized });
+                }
+              }
+            }
           }
+        } catch (aiErr) {
+          console.warn(`Vision AI provider fetch attempt ${attempt} failed:`, aiErr);
         }
-      } catch (aiErr) {
-        console.warn('AI provider fetch failed, falling back to NLP parser:', aiErr);
       }
     }
 
-    // Fallback if no key or API failed
-    if (text) {
+    // Fallback parser if API key omitted or Vision API failed
+    if (text && typeof text === 'string' && text.trim()) {
       const fallbackProfile = extractProfileFallback(text);
-      return res.json({ success: true, profile: fallbackProfile, method: 'fallback' });
-    } else {
-      return res.status(400).json({ error: 'AI key unavailable for direct vision processing. Please use client-side OCR text extraction.' });
+      if (fallbackProfile && fallbackProfile.subjects && fallbackProfile.subjects.length > 0) {
+        return res.json({ success: true, profile: fallbackProfile });
+      }
     }
+
+    const defaultErrorMsg = image
+      ? 'Unable to analyze the image. Please try again.'
+      : 'The AI response was incomplete. Please try again.';
+
+    return res.status(400).json({
+      success: false,
+      error: defaultErrorMsg
+    });
   } catch (error: any) {
-    try {
-      const fallbackProfile = extractProfileFallback(req.body.text || '');
-      return res.json({ success: true, profile: fallbackProfile, method: 'fallback_error' });
-    } catch {
-      res.status(500).json({ error: error.message || 'Failed to extract profile.' });
-    }
+    const defaultErrorMsg = req.body && req.body.image
+      ? 'Unable to analyze the image. Please try again.'
+      : 'The AI response was incomplete. Please try again.';
+
+    return res.status(500).json({
+      success: false,
+      error: defaultErrorMsg
+    });
   }
 });
 
@@ -359,7 +477,7 @@ app.get('/api/profiles/filters', (req: Request, res: Response) => {
   }
 });
 
-// GET /api/profiles - List public profiles with multi-filtering
+// GET /api/profiles - List public profiles with multi-filtering and sorting
 app.get('/api/profiles', (req: Request, res: Response) => {
   try {
     const {
@@ -368,7 +486,8 @@ app.get('/api/profiles', (req: Request, res: Response) => {
       faculty = '',
       department = '',
       academic_year = '',
-      semester = ''
+      semester = '',
+      sort = 'newest'
     } = req.query;
 
     let queryStr = `
@@ -384,8 +503,19 @@ app.get('/api/profiles', (req: Request, res: Response) => {
 
     if (search && (search as string).trim()) {
       const term = `%${(search as string).trim()}%`;
-      queryStr += ` AND (p.profile_name LIKE ? OR p.university LIKE ? OR p.faculty LIKE ? OR p.department LIKE ? OR p.id LIKE ?)`;
-      params.push(term, term, term, term, term);
+      queryStr += ` AND (
+        p.profile_name LIKE ? OR 
+        p.university LIKE ? OR 
+        p.faculty LIKE ? OR 
+        p.department LIKE ? OR 
+        p.id LIKE ? OR
+        EXISTS (
+          SELECT 1 FROM semesters s 
+          JOIN subjects sub ON sub.semester_id = s.id 
+          WHERE s.profile_id = p.id AND (sub.subject_code LIKE ? OR sub.subject_name LIKE ?)
+        )
+      )`;
+      params.push(term, term, term, term, term, term, term);
     }
 
     if (university && (university as string).trim()) {
@@ -414,7 +544,14 @@ app.get('/api/profiles', (req: Request, res: Response) => {
       params.push(semTerm, (semester as string).trim());
     }
 
-    queryStr += ` ORDER BY p.created_at DESC LIMIT 50`;
+    // Apply sorting
+    if (sort === 'university_asc') {
+      queryStr += ` ORDER BY p.university ASC, p.profile_name ASC, p.created_at DESC LIMIT 50`;
+    } else if (sort === 'faculty_asc') {
+      queryStr += ` ORDER BY p.faculty ASC, p.profile_name ASC, p.created_at DESC LIMIT 50`;
+    } else {
+      queryStr += ` ORDER BY p.created_at DESC LIMIT 50`;
+    }
 
     const profiles = db.prepare(queryStr).all(...params);
 
@@ -528,7 +665,7 @@ app.post('/api/profiles', (req: Request, res: Response) => {
         if (sem.subjects && Array.isArray(sem.subjects)) {
           for (const sub of sem.subjects) {
             const creditVal = parseFloat(sub.credit);
-            if (sub.subject_name && !isNaN(creditVal) && creditVal > 0) {
+            if (sub.subject_name && !isNaN(creditVal) && creditVal >= 0) {
               insertSubject.run(semId, sub.subject_code || '', sub.subject_name.trim(), creditVal);
             }
           }
@@ -655,7 +792,7 @@ app.put('/api/profiles/:id', (req: Request, res: Response) => {
         if (sem.subjects && Array.isArray(sem.subjects)) {
           for (const sub of sem.subjects) {
             const creditVal = parseFloat(sub.credit);
-            if (sub.subject_name && !isNaN(creditVal) && creditVal > 0) {
+            if (sub.subject_name && !isNaN(creditVal) && creditVal >= 0) {
               insertSubject.run(semId, sub.subject_code || '', sub.subject_name.trim(), creditVal);
             }
           }

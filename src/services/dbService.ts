@@ -2,8 +2,10 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import type { Profile, GradeOption, Semester } from '../types';
 import { DEFAULT_GRADING_SCALE } from '../utils/gpa';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || import.meta.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const globalProcess = (typeof globalThis !== 'undefined' && (globalThis as any).process) ? (globalThis as any).process.env : {};
+const env = (typeof import.meta !== 'undefined' && (import.meta as any).env) ? (import.meta as any).env : globalProcess;
+const supabaseUrl = env.VITE_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || env.VITE_SUPABASE_PUBLISHABLE_KEY || env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
@@ -36,6 +38,34 @@ async function hashPasscode(passcode: string): Promise<string> {
 // Public API Service Methods (Dual-mode: Supabase / Express)
 // -------------------------------------------------------------
 
+// Timeout wrapper to guarantee queries never hang indefinitely
+export async function withTimeout<T>(promise: Promise<T>, ms = 5000, fallbackErrMsg = 'Request timed out'): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(fallbackErrMsg)), ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
+}
+
+// Clean extracted subject names automatically
+export function cleanSubjectTitle(rawTitle: string): string {
+  if (!rawTitle) return '';
+  let title = rawTitle
+    .replace(/\b(?:Room|Lab|LH|Venue|Hall|Building)\s*[-:\s]?\s*[A-Z0-9]+/gi, '')
+    .replace(/\b\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?\b/g, '')
+    .replace(/\b(?:by\s+)?(?:Dr\.|Prof\.|Professor|Mr\.|Ms\.)\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*/gi, '')
+    .replace(/\b\d+(?:\.\d+)?\s*(?:credits?|cr|pts?|credit hours?|c\.h\.)\b/gi, '')
+    .replace(/[\(\[\{]\s*(?:credit[s]?|cr|pts?|units?)?\s*[\)\]\}]/gi, '')
+    .replace(/^[\s\-–—:•*#|.]+/, '')
+    .replace(/[\s\-–—:•*#|.]+$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Strip trailing hyphens, dashes, colons, extra spaces, or duplicate punctuation
+  title = title.replace(/[\s\-–—:;,\.]*$/, '').trim();
+  return title;
+}
+
 export interface ProfileFilterParams {
   search?: string;
   university?: string;
@@ -43,6 +73,7 @@ export interface ProfileFilterParams {
   department?: string;
   academicYear?: string;
   semester?: string;
+  sort?: 'newest' | 'university_asc' | 'faculty_asc';
 }
 
 export async function fetchFilterOptions(): Promise<{
@@ -53,18 +84,32 @@ export async function fetchFilterOptions(): Promise<{
   academicYears: string[];
 }> {
   if (isSupabaseConfigured && supabase) {
-    const { data } = await supabase
-      .from('profiles')
-      .select('university, faculty, department, academic_year')
-      .eq('visibility', 'public');
+    try {
+      const res: any = await withTimeout(
+        supabase
+          .from('profiles')
+          .select('university, faculty, department, academic_year')
+          .eq('visibility', 'public') as any,
+        5000
+      );
+      const data: any[] = res?.data || [];
 
-    const universities = Array.from(new Set((data || []).map(p => p.university).filter(Boolean))).sort();
-    const faculties = Array.from(new Set((data || []).map(p => p.faculty).filter(Boolean))).sort();
-    const departments = Array.from(new Set((data || []).map(p => p.department).filter(Boolean))).sort();
-    const academicYears = Array.from(new Set((data || []).map(p => p.academic_year).filter(Boolean))).sort().reverse();
+      const universities: string[] = Array.from(new Set(data.map((p: any) => p.university).filter(Boolean)));
+      universities.sort();
+      const faculties: string[] = Array.from(new Set(data.map((p: any) => p.faculty).filter(Boolean)));
+      faculties.sort();
+      const departments: string[] = Array.from(new Set(data.map((p: any) => p.department).filter(Boolean)));
+      departments.sort();
+      const academicYears: string[] = Array.from(new Set(data.map((p: any) => p.academic_year).filter(Boolean)));
+      academicYears.sort().reverse();
 
-    return { universities, faculties, departments, degrees: [], academicYears };
-  } else {
+      return { universities, faculties, departments, degrees: [], academicYears };
+    } catch {
+      // Fallback to Express backend
+    }
+  }
+
+  try {
     const res = await fetch('/api/profiles/filters');
     if (!res.ok) return { universities: [], faculties: [], departments: [], degrees: [], academicYears: [] };
     const data = await res.json();
@@ -75,6 +120,8 @@ export async function fetchFilterOptions(): Promise<{
       degrees: [],
       academicYears: data.academicYears || []
     };
+  } catch {
+    return { universities: [], faculties: [], departments: [], degrees: [], academicYears: [] };
   }
 }
 
@@ -84,110 +131,157 @@ export async function fetchPublicProfiles(paramsOrQuery: string | ProfileFilterP
     : paramsOrQuery;
 
   if (isSupabaseConfigured && supabase) {
-    let query = supabase
-      .from('profiles')
-      .select(`
-        id, profile_name, university, faculty, department, degree, academic_year, visibility, created_at,
-        semesters (
-          id, semester_name, semester_order,
-          subjects (
-            id, credit
-          )
-        )
-      `)
-      .eq('visibility', 'public')
-      .order('created_at', { ascending: false })
-      .limit(50);
-
-    if (filters.search && filters.search.trim()) {
-      const term = `%${filters.search.trim()}%`;
-      query = query.or(`profile_name.ilike.${term},university.ilike.${term},faculty.ilike.${term},department.ilike.${term},id.ilike.${term}`);
-    }
-    if (filters.university) query = query.eq('university', filters.university);
-    if (filters.faculty) query = query.eq('faculty', filters.faculty);
-    if (filters.department) query = query.eq('department', filters.department);
-    if (filters.academicYear) query = query.eq('academic_year', filters.academicYear);
-
-    let { data, error } = await query;
-    if (error && (error.message.includes('department') || error.message.includes('schema cache'))) {
-      // Retry without department column if missing in Supabase schema cache
-      let fallbackQuery = supabase
+    try {
+      let query = supabase
         .from('profiles')
         .select(`
-          id, profile_name, university, faculty, academic_year, visibility, created_at,
+          id, profile_name, university, faculty, department, degree, academic_year, visibility, created_at,
           semesters (
             id, semester_name, semester_order,
             subjects (
-              id, credit
+              id, subject_code, subject_name, credit
             )
           )
         `)
         .eq('visibility', 'public')
-        .order('created_at', { ascending: false })
         .limit(50);
+
+      if (filters.sort === 'university_asc') {
+        query = query.order('university', { ascending: true }).order('profile_name', { ascending: true });
+      } else if (filters.sort === 'faculty_asc') {
+        query = query.order('faculty', { ascending: true }).order('profile_name', { ascending: true });
+      } else {
+        query = query.order('created_at', { ascending: false });
+      }
 
       if (filters.search && filters.search.trim()) {
         const term = `%${filters.search.trim()}%`;
-        fallbackQuery = fallbackQuery.or(`profile_name.ilike.${term},university.ilike.${term},faculty.ilike.${term},id.ilike.${term}`);
+        query = query.or(`profile_name.ilike.${term},university.ilike.${term},faculty.ilike.${term},department.ilike.${term},id.ilike.${term}`);
       }
-      if (filters.university) fallbackQuery = fallbackQuery.eq('university', filters.university);
-      if (filters.faculty) fallbackQuery = fallbackQuery.eq('faculty', filters.faculty);
-      if (filters.academicYear) fallbackQuery = fallbackQuery.eq('academic_year', filters.academicYear);
+      if (filters.university) query = query.eq('university', filters.university);
+      if (filters.faculty) query = query.eq('faculty', filters.faculty);
+      if (filters.department) query = query.eq('department', filters.department);
+      if (filters.academicYear) query = query.eq('academic_year', filters.academicYear);
 
-      const fbRes = await fallbackQuery;
-      data = (fbRes.data || []).map(p => ({ ...p, department: '', degree: '' }));
-      error = fbRes.error;
-    }
+      const queryRes: any = await withTimeout(query as any, 5000);
+      let data: any = queryRes?.data;
+      let error: any = queryRes?.error;
+      if (error && (error.message.includes('department') || error.message.includes('schema cache'))) {
+        let fallbackQuery = supabase
+          .from('profiles')
+          .select(`
+            id, profile_name, university, faculty, academic_year, visibility, created_at,
+            semesters (
+              id, semester_name, semester_order,
+              subjects (
+                id, subject_code, subject_name, credit
+              )
+            )
+          `)
+          .eq('visibility', 'public')
+          .limit(50);
 
-    if (error) throw new Error(error.message);
+        if (filters.sort === 'university_asc') {
+          fallbackQuery = fallbackQuery.order('university', { ascending: true });
+        } else if (filters.sort === 'faculty_asc') {
+          fallbackQuery = fallbackQuery.order('faculty', { ascending: true });
+        } else {
+          fallbackQuery = fallbackQuery.order('created_at', { ascending: false });
+        }
 
-    // Format count and credit totals, and apply client-side semester filter if provided
-    let results = (data || []).map(p => {
-      let totalSubjects = 0;
-      let totalCredits = 0;
-      const semesterCount = p.semesters && Array.isArray(p.semesters) ? p.semesters.length : 0;
-      if (p.semesters && Array.isArray(p.semesters)) {
-        p.semesters.forEach((sem: any) => {
-          if (sem.subjects && Array.isArray(sem.subjects)) {
-            totalSubjects += sem.subjects.length;
-            sem.subjects.forEach((sub: any) => {
-              totalCredits += Number(sub.credit || 0);
+        if (filters.search && filters.search.trim()) {
+          const term = `%${filters.search.trim()}%`;
+          fallbackQuery = fallbackQuery.or(`profile_name.ilike.${term},university.ilike.${term},faculty.ilike.${term},id.ilike.${term}`);
+        }
+        if (filters.university) fallbackQuery = fallbackQuery.eq('university', filters.university);
+        if (filters.faculty) fallbackQuery = fallbackQuery.eq('faculty', filters.faculty);
+        if (filters.academicYear) fallbackQuery = fallbackQuery.eq('academic_year', filters.academicYear);
+
+        const fbRes: any = await withTimeout(fallbackQuery as any, 5000);
+        data = (fbRes?.data || []).map((p: any) => ({ ...p, department: '', degree: '' }));
+        error = fbRes?.error;
+      }
+
+      if (!error && data) {
+        let results = (data || []).map((p: any) => {
+          let totalSubjects = 0;
+          let totalCredits = 0;
+          const semesterCount = p.semesters && Array.isArray(p.semesters) ? p.semesters.length : 0;
+          if (p.semesters && Array.isArray(p.semesters)) {
+            p.semesters.forEach((sem: any) => {
+              if (sem.subjects && Array.isArray(sem.subjects)) {
+                totalSubjects += sem.subjects.length;
+                sem.subjects.forEach((sub: any) => {
+                  totalCredits += Number(sub.credit || 0);
+                });
+              }
             });
           }
+          return {
+            ...p,
+            semester_count: semesterCount,
+            total_subjects: totalSubjects,
+            total_credits: Math.round(totalCredits * 100) / 100
+          };
         });
+
+        // Search in module code or subject name if provided
+        if (filters.search && filters.search.trim()) {
+          const sTerm = filters.search.trim().toLowerCase();
+          results = results.filter((p: any) => {
+            const matchesDirect = 
+              (p.profile_name && p.profile_name.toLowerCase().includes(sTerm)) ||
+              (p.university && p.university.toLowerCase().includes(sTerm)) ||
+              (p.faculty && p.faculty.toLowerCase().includes(sTerm)) ||
+              (p.department && p.department.toLowerCase().includes(sTerm)) ||
+              (p.id && p.id.toLowerCase().includes(sTerm));
+            if (matchesDirect) return true;
+            return p.semesters && p.semesters.some((s: any) =>
+              s.subjects && s.subjects.some((sub: any) =>
+                (sub.subject_code && sub.subject_code.toLowerCase().includes(sTerm)) ||
+                (sub.subject_name && sub.subject_name.toLowerCase().includes(sTerm))
+              )
+            );
+          });
+        }
+
+        if (filters.semester && filters.semester.trim()) {
+          const semTerm = filters.semester.trim().toLowerCase();
+          results = results.filter((p: any) => p.semesters && p.semesters.some((s: any) => 
+            (s.semester_name && s.semester_name.toLowerCase().includes(semTerm)) ||
+            (s.semester_order && String(s.semester_order) === semTerm)
+          ));
+        }
+
+        // Apply sorting
+        if (filters.sort === 'university_asc') {
+          results.sort((a: any, b: any) => (a.university || '').localeCompare(b.university || ''));
+        } else if (filters.sort === 'faculty_asc') {
+          results.sort((a: any, b: any) => (a.faculty || '').localeCompare(b.faculty || ''));
+        }
+
+        return results;
       }
-      return {
-        ...p,
-        semester_count: semesterCount,
-        total_subjects: totalSubjects,
-        total_credits: Math.round(totalCredits * 100) / 100
-      };
-    });
-
-    if (filters.semester && filters.semester.trim()) {
-      const semTerm = filters.semester.trim().toLowerCase();
-      results = results.filter(p => p.semesters && p.semesters.some((s: any) => 
-        (s.semester_name && s.semester_name.toLowerCase().includes(semTerm)) ||
-        (s.semester_order && String(s.semester_order) === semTerm)
-      ));
+    } catch {
+      // Supabase failed or timed out, seamlessly fallback to SQLite Express API
     }
-
-    return results;
-  } else {
-    const searchParams = new URLSearchParams();
-    if (filters.search) searchParams.set('search', filters.search);
-    if (filters.university) searchParams.set('university', filters.university);
-    if (filters.faculty) searchParams.set('faculty', filters.faculty);
-    if (filters.department) searchParams.set('department', filters.department);
-    if (filters.academicYear) searchParams.set('academic_year', filters.academicYear);
-    if (filters.semester) searchParams.set('semester', filters.semester);
-
-    const queryString = searchParams.toString();
-    const url = queryString ? `/api/profiles?${queryString}` : '/api/profiles';
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('Failed to fetch profiles');
-    return res.json();
   }
+
+  // Fallback to Express backend endpoint
+  const searchParams = new URLSearchParams();
+  if (filters.search) searchParams.set('search', filters.search);
+  if (filters.university) searchParams.set('university', filters.university);
+  if (filters.faculty) searchParams.set('faculty', filters.faculty);
+  if (filters.department) searchParams.set('department', filters.department);
+  if (filters.academicYear) searchParams.set('academic_year', filters.academicYear);
+  if (filters.semester) searchParams.set('semester', filters.semester);
+  if (filters.sort) searchParams.set('sort', filters.sort);
+
+  const queryString = searchParams.toString();
+  const url = queryString ? `/api/profiles?${queryString}` : '/api/profiles';
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Failed to fetch profiles. Please try again.');
+  return res.json();
 }
 
 export async function fetchProfileById(profileId: string): Promise<Profile> {
@@ -500,7 +594,7 @@ export async function updateProfile(
 
       if (sem.subjects && Array.isArray(sem.subjects)) {
         const subjectRows = sem.subjects
-          .filter(sub => sub.subject_name && Number(sub.credit) > 0)
+          .filter(sub => sub.subject_name && Number(sub.credit) >= 0)
           .map(sub => ({
             semester_id: semRow.id,
             subject_code: sub.subject_code || '',
@@ -570,17 +664,16 @@ export async function deleteProfile(profileId: string, passcode: string): Promis
 export function extractProfileFallbackClient(inputText: string): any {
   const lines = inputText.split('\n').map(l => l.trim()).filter(Boolean);
   
-  let profile_name = '';
-  let university = 'Not detected';
-  let faculty = 'Not detected';
-  let department = 'Not detected';
-  let academic_year = 'Not detected';
-  let semesterName = 'Not detected';
+  let profileName = '';
+  let university = '';
+  let faculty = '';
+  let department = '';
+  let academicYear = '';
+  let semester = '';
 
-  const extractedSubjects: Array<{ subject_code: string; subject_name: string; credit: number | null }> = [];
+  const subjects: Array<{ moduleNumber: string; subjectName: string; credit: number | null }> = [];
 
   for (const line of lines) {
-    // Skip lecturer, staff, room, time, contact, or page number lines
     if (/^(?:Dr\.|Prof\.|Professor|Doctor|Lecturer|Instructor|Teacher|Taught\s+by|Staff|Email|Phone|Tel|Contact|Room|Lab|LH|Venue|Building|Time|Day|Date|Page\s*\d+)/i.test(line)) {
       continue;
     }
@@ -588,10 +681,9 @@ export function extractProfileFallbackClient(inputText: string): any {
       continue;
     }
 
-    // 1. Explicit / Labelled Metadata Detection
     if (/^(?:PROFILE\s*NAME|PROFILE)\s*:\s*(.+)/i.test(line)) {
       const match = line.match(/^(?:PROFILE\s*NAME|PROFILE)\s*:\s*(.+)/i);
-      if (match && match[1]) profile_name = match[1].trim();
+      if (match && match[1]) profileName = match[1].trim();
       continue;
     }
     if (/^(?:UNIVERSITY|UNI|INSTITUTION)\s*:\s*(.+)/i.test(line)) {
@@ -611,137 +703,229 @@ export function extractProfileFallbackClient(inputText: string): any {
     }
     if (/^(?:ACADEMIC\s*YEAR|YEAR|BATCH)\s*:\s*(.+)/i.test(line)) {
       const match = line.match(/^(?:ACADEMIC\s*YEAR|YEAR|BATCH)\s*:\s*(.+)/i);
-      if (match && match[1]) academic_year = match[1].trim();
+      if (match && match[1]) academicYear = match[1].trim();
       continue;
     }
     if (/^(?:SEMESTER|TERM)\s*:\s*(.+)/i.test(line)) {
       const match = line.match(/^(?:SEMESTER|TERM)\s*:\s*(.+)/i);
-      if (match && match[1]) semesterName = match[1].startsWith('Semester') ? match[1].trim() : `Semester ${match[1].trim()}`;
+      if (match && match[1]) semester = match[1].toLowerCase().startsWith('semester') ? match[1].trim() : `Semester ${match[1].trim()}`;
       continue;
     }
 
-    // 2. Unlabelled Header Heuristics (Do NOT convert headings to subjects)
-    if (university === 'Not detected' && /^(?:University|Institute|College|Academy)\b/i.test(line)) {
+    if (!university && /^(?:University|Institute|College|Academy)\b/i.test(line)) {
       university = line.trim();
       continue;
     }
-    if (faculty === 'Not detected' && /^(?:Faculty|School)\s+of\b/i.test(line)) {
+    if (!faculty && /^(?:Faculty|School)\s+of\b/i.test(line)) {
       faculty = line.trim();
       continue;
     }
-    if (department === 'Not detected' && /^(?:Department|Dept\.)\s+of\b/i.test(line)) {
+    if (!department && /^(?:Department|Dept\.)\s+of\b/i.test(line)) {
       department = line.trim();
       continue;
     }
-    if (academic_year === 'Not detected' && /\b(20\d{2}[-/]20\d{2}|Year\s+[1-5]|Academic\s+Year\s+\d+)\b/i.test(line)) {
+    if (!academicYear && /\b(20\d{2}[-/]20\d{2}|Year\s+[1-5]|Academic\s+Year\s+\d+)\b/i.test(line)) {
       const match = line.match(/\b(20\d{2}[-/]20\d{2}|Year\s+[1-5]|Academic\s+Year\s+\d+)\b/i);
-      if (match) academic_year = match[1].trim();
+      if (match) academicYear = match[1].trim();
       continue;
     }
-    if (semesterName === 'Not detected' && /\b(Semester\s+[1-8]|Sem\s+[1-8]|Term\s+[1-4])\b/i.test(line)) {
+    if (!semester && /\b(Semester\s+[1-8]|Sem\s+[1-8]|Term\s+[1-4])\b/i.test(line)) {
       const match = line.match(/\b(Semester\s+[1-8]|Sem\s+[1-8]|Term\s+[1-4])\b/i);
-      if (match) semesterName = match[1].trim();
+      if (match) semester = match[1].trim();
       continue;
     }
 
-    // Skip section headers, titles, or notes
-    if (/^(?:SUBJECTS|MODULES|COURSES|INSTRUCTIONS?|NOTES?|TIMETABLE|RESULTS?|GRADES?|SYLLABUS|COURSE OUTLINE|MODULE LIST|SL\.\s*NO|SR\.\s*NO)\s*:?$/i.test(line)) {
+    if (/^(?:SUBJECTS|MODULES|COURSES|INSTRUCTIONS?|NOTES?|TIMETABLE|RESULTS?|GRADES?|SYLLABUS|COURSE OUTLINE|MODULE LIST|SL\.\s*NO|SR\.\s*NO|MODULE CODE|SUBJECT NAME|CREDITS?)\s*:?$/i.test(line)) {
       continue;
     }
 
-    // 3. Subject Extraction Rule
-    // Detect module code (e.g. NANO2112, ETCH2111, PDEV2110, CS 101, MATH-202)
     const codeMatch = line.match(/^([A-Z]{2,6}\s*[-–—]?\s*\d{3,5}[A-Z]?)\b\s*[-–—:|]?\s*(.*)$/i);
-    let subjectCode = '';
+    let moduleNumber = '';
     let remainingLine = '';
 
     if (codeMatch) {
-      subjectCode = codeMatch[1].replace(/\s+/g, '').toUpperCase();
+      moduleNumber = codeMatch[1].replace(/\s+/g, '').toUpperCase();
       remainingLine = codeMatch[2].trim();
     } else {
-      const parts = line.split(/[-–—|]/).map(p => p.trim()).filter(Boolean);
-      if (parts.length >= 2) {
-        if (/^[A-Z]{2,6}\s*\d{3,5}[A-Z]?$/i.test(parts[0])) {
-          subjectCode = parts[0].replace(/\s+/g, '').toUpperCase();
-          remainingLine = parts.slice(1).join(' - ');
-        }
+      const inlineCodeMatch = line.match(/\b([A-Z]{2,6}\s*[-–—]?\s*\d{3,5}[A-Z]?)\b/i);
+      if (inlineCodeMatch) {
+        moduleNumber = inlineCodeMatch[1].replace(/\s+/g, '').toUpperCase();
+        remainingLine = line.replace(inlineCodeMatch[0], '').replace(/^[-–—:|]+/, '').trim();
       }
     }
 
-    if (subjectCode || (remainingLine && !/^(?:University|Faculty|Department|Semester|Academic Year|Grade|Point|Marks|Total|GPA|CGPA|Credit|Lecturer|Dr\.|Prof\.)/i.test(line))) {
-      let credit: number | null = null; // null represents unassigned/undetected
+    if (moduleNumber || (remainingLine && !/^(?:University|Faculty|Department|Semester|Academic Year|Grade|Point|Marks|Total|GPA|CGPA|Credit|Lecturer|Dr\.|Prof\.)/i.test(line))) {
+      let credit: number | null = null;
       let subjectTitle = remainingLine || line;
 
-      // Strip lecturer names, rooms, or times trailing in the subject title
-      subjectTitle = subjectTitle
-        .replace(/\b(?:by\s+)?(?:Dr\.|Prof\.|Professor|Mr\.|Ms\.)\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*/gi, '')
-        .replace(/\b(?:Room|Lab|LH|Venue|Hall)\s*[-:\s]?\s*[A-Z0-9]+/gi, '')
-        .replace(/\b\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?\b/g, '')
-        .trim();
+      subjectTitle = cleanSubjectTitle(subjectTitle);
 
-      // Explicit credit regex matching (supports 0, 0.5, 1, 2, 3, 4, etc.)
+      const explicitCreditMatch = subjectTitle.match(/(?:^|[-–—:|,\s])(\d+(?:\.\d+)?)\s*(?:credits?|cr|pts?|credit hours?|c\.h\.)(?:$|[\)\s])/i);
       const trailingCreditMatch = subjectTitle.match(/[-–—:|]?\s*(\d+(?:\.\d+)?)\s*(?:credits?|cr|pts?)?\s*$/i);
-      const explicitCreditMatch = subjectTitle.match(/(?:^|[-–—:|,\s])(\d+(?:\.\d+)?)\s*(?:credits?|cr|pts?|credit hours?|c\.h\.)?(?:$|[\)\s])/i);
 
-      if (trailingCreditMatch && trailingCreditMatch[1] !== undefined) {
+      if (explicitCreditMatch && explicitCreditMatch[1] !== undefined) {
+        const val = parseFloat(explicitCreditMatch[1]);
+        if (!isNaN(val) && val >= 0 && val <= 12) {
+          credit = val;
+        }
+      } else if (trailingCreditMatch && trailingCreditMatch[1] !== undefined && /(?:credits?|cr|pts?)/i.test(line)) {
         const val = parseFloat(trailingCreditMatch[1]);
         if (!isNaN(val) && val >= 0 && val <= 12) {
           credit = val;
           subjectTitle = subjectTitle.substring(0, trailingCreditMatch.index).trim();
         }
-      } else if (explicitCreditMatch && explicitCreditMatch[1] !== undefined) {
-        const val = parseFloat(explicitCreditMatch[1]);
-        if (!isNaN(val) && val >= 0 && val <= 12) {
-          credit = val;
+      }
+
+      if (credit === null && moduleNumber) {
+        const digits = moduleNumber.match(/\d/g);
+        if (digits && digits.length > 0) {
+          const lastDigitVal = parseInt(digits[digits.length - 1], 10);
+          if (!isNaN(lastDigitVal)) {
+            credit = lastDigitVal;
+          }
         }
       }
 
-      // Clean trailing punctuation
-      subjectTitle = subjectTitle
-        .replace(/^[-–—:|]+/, '')
-        .replace(/[-–—:|]+$/, '')
-        .replace(/\b\d+(?:\.\d+)?\s*(?:credits?|cr|pts?)\b/gi, '')
-        .trim();
+      subjectTitle = cleanSubjectTitle(subjectTitle);
 
-      if (!subjectTitle && subjectCode) {
-        subjectTitle = subjectCode;
+      if (!subjectTitle && moduleNumber) {
+        subjectTitle = moduleNumber;
       }
 
-      if (subjectTitle || subjectCode) {
-        extractedSubjects.push({
-          subject_code: subjectCode,
-          subject_name: subjectTitle,
-          credit: credit // null if missing/unspecified; 0 if explicitly 0
+      if (subjectTitle || moduleNumber) {
+        subjects.push({
+          moduleNumber,
+          subjectName: subjectTitle,
+          credit
         });
       }
     }
   }
 
-  if (!profile_name) {
-    if (university !== 'Not detected') {
-      profile_name = `${university}${academic_year !== 'Not detected' ? ' - ' + academic_year : ''}`;
-    } else {
-      profile_name = 'Academic Profile';
-    }
-  }
-
   return {
-    profile_name,
+    profileName,
     university,
     faculty,
     department,
-    academic_year,
-    semester: semesterName,
-    semesters: [
-      {
-        semester_name: semesterName !== 'Not detected' ? semesterName : 'Semester 1',
-        subjects: extractedSubjects
-      }
-    ]
+    academicYear,
+    semester,
+    subjects
   };
 }
 
+export function normalizeExtractedProfileClient(raw: any) {
+  if (!raw || typeof raw !== 'object') return extractProfileFallbackClient('');
+  let profileName = raw.profileName || raw.profile_name || '';
+  if (
+    profileName === 'Not detected' ||
+    /Academic Profile/i.test(profileName) ||
+    /Semester\s*\d+/i.test(profileName) ||
+    /University/i.test(profileName) ||
+    /Faculty/i.test(profileName) ||
+    /Department/i.test(profileName) ||
+    /Bachelor|BSc|MSc|Master|Degree|Diploma/i.test(profileName)
+  ) {
+    profileName = '';
+  }
+
+  let university = raw.university === 'Not detected' ? '' : (raw.university || '');
+  let faculty = raw.faculty === 'Not detected' ? '' : (raw.faculty || '');
+  let department = raw.department === 'Not detected' ? '' : (raw.department || '');
+  let academicYear = raw.academicYear || raw.academic_year || '';
+  if (academicYear === 'Not detected') academicYear = '';
+  let semester = raw.semester || '';
+  if (semester === 'Not detected') semester = '';
+
+  let subjects: Array<{ moduleNumber: string; subjectName: string; credit: number | null }> = [];
+
+  const extractSubjectObj = (s: any) => {
+    const mod = (s.moduleNumber || s.subject_code || s.code || '').trim();
+    let name = (s.subjectName || s.subject_name || s.name || mod || '').trim();
+
+    name = name
+      .replace(/\b(?:by\s+)?(?:Dr\.|Prof\.|Professor|Mr\.|Ms\.)\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*/gi, '')
+      .replace(/\b(?:Room|Lab|LH|Venue|Hall)\s*[-:\s]?\s*[A-Z0-9]+/gi, '')
+      .trim();
+
+    let cr: number | null = null;
+    if (s.credit !== null && s.credit !== undefined && s.credit !== '' && !isNaN(Number(s.credit))) {
+      cr = Number(s.credit);
+    } else if (mod) {
+      const digits = mod.match(/\d/g);
+      if (digits && digits.length > 0) {
+        const lastDigitVal = parseInt(digits[digits.length - 1], 10);
+        if (!isNaN(lastDigitVal)) cr = lastDigitVal;
+      }
+    }
+
+    return {
+      moduleNumber: mod === 'Not detected' ? '' : mod,
+      subjectName: name === 'Not detected' ? '' : name,
+      credit: cr
+    };
+  };
+
+  if (Array.isArray(raw.subjects)) {
+    subjects = raw.subjects.map(extractSubjectObj).filter(s => s.moduleNumber || s.subjectName);
+  } else if (Array.isArray(raw.semesters)) {
+    raw.semesters.forEach((sem: any) => {
+      if (!semester && sem.semester_name) {
+        semester = sem.semester_name;
+      }
+      if (Array.isArray(sem.subjects)) {
+        sem.subjects.forEach((s: any) => {
+          const extractedSub = extractSubjectObj(s);
+          if (extractedSub.moduleNumber || extractedSub.subjectName) {
+            subjects.push(extractedSub);
+          }
+        });
+      }
+    });
+  }
+
+  return {
+    profileName,
+    university,
+    faculty,
+    department,
+    academicYear,
+    semester,
+    subjects
+  };
+}
+
+export async function safeFetchJsonResponse(res: Response): Promise<any> {
+  let text = '';
+  try {
+    text = await res.text();
+  } catch {
+    throw new Error('The AI response was incomplete. Please try again.');
+  }
+
+  if (!text || !text.trim()) {
+    throw new Error('The AI response was incomplete. Please try again.');
+  }
+
+  let data: any;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error('The AI response was incomplete. Please try again.');
+  }
+
+  if (!res.ok) {
+    const errorMsg = data && typeof data === 'object' && data.error ? data.error : 'The AI response was incomplete. Please try again.';
+    throw new Error(errorMsg);
+  }
+
+  return data;
+}
+
 export async function extractAiProfile(text: string): Promise<any> {
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    throw new Error('Please paste university or course text to analyze.');
+  }
+
   try {
     const res = await fetch('/api/ai/extract-profile', {
       method: 'POST',
@@ -749,23 +933,42 @@ export async function extractAiProfile(text: string): Promise<any> {
       body: JSON.stringify({ text })
     });
 
-    if (res.ok) {
-      const data = await res.json();
-      if (data.profile) return data.profile;
+    const data = await safeFetchJsonResponse(res);
+    if (data && data.success && data.profile) {
+      const normalized = normalizeExtractedProfileClient(data.profile);
+      if (normalized && normalized.subjects && normalized.subjects.length > 0) {
+        return normalized;
+      }
+    } else if (data && data.error) {
+      throw new Error(data.error);
     }
-  } catch (err) {
-    console.warn('Backend AI endpoint fetch failed, using client-side fallback:', err);
+  } catch (err: any) {
+    if (err.message && (err.message.includes('incomplete') || err.message.includes('required') || err.message.includes('Please'))) {
+      const fallback = extractProfileFallbackClient(text);
+      if (fallback && fallback.subjects && fallback.subjects.length > 0) {
+        return fallback;
+      }
+      throw err;
+    }
+    console.warn('Backend AI endpoint fetch failed, trying client-side fallback:', err);
   }
 
-  // Pure client-side fallback guarantee
-  return extractProfileFallbackClient(text);
+  const fallback = extractProfileFallbackClient(text);
+  if (fallback && fallback.subjects && fallback.subjects.length > 0) {
+    return fallback;
+  }
+  throw new Error('The AI response was incomplete. Please try again.');
 }
 
 export async function extractAiProfileFromImage(
   imageFile: File,
   onProgress?: (progressPct: number) => void
 ): Promise<any> {
-  // 1. Try server-side multimodal image vision endpoint if available
+  const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+  if (imageFile.type && !validTypes.includes(imageFile.type.toLowerCase())) {
+    throw new Error('Invalid image format. Please upload a JPG, JPEG, PNG, or WEBP image.');
+  }
+
   try {
     const reader = new FileReader();
     const base64Promise = new Promise<string>((resolve, reject) => {
@@ -783,18 +986,29 @@ export async function extractAiProfileFromImage(
       body: JSON.stringify({ image: base64Data })
     });
 
-    if (res.ok) {
-      const data = await res.json();
-      if (data.profile && data.method === 'ai_vision') {
-        onProgress?.(100);
-        return data.profile;
+    const text = await res.text().catch(() => '');
+    if (text && text.trim()) {
+      try {
+        const data = JSON.parse(text);
+        if (data.success && data.profile && data.profile.subjects && data.profile.subjects.length > 0) {
+          onProgress?.(100);
+          return normalizeExtractedProfileClient(data.profile);
+        } else if (data.error && res.ok === false) {
+          throw new Error(data.error);
+        }
+      } catch (jsonErr: any) {
+        if (jsonErr.message && jsonErr.message.includes('Unable to analyze')) {
+          throw jsonErr;
+        }
       }
     }
-  } catch (err) {
-    console.warn('Backend AI vision endpoint unavailable, continuing to client-side OCR:', err);
+  } catch (err: any) {
+    if (err.message && (err.message.includes('Unable to analyze') || err.message.includes('Invalid image'))) {
+      throw err;
+    }
+    console.warn('Backend AI vision endpoint unavailable or failed, continuing to client-side OCR:', err);
   }
 
-  // 2. Perform client-side OCR via Tesseract.js
   onProgress?.(30);
   try {
     const { createWorker } = await import('tesseract.js');
@@ -813,16 +1027,15 @@ export async function extractAiProfileFromImage(
     onProgress?.(95);
 
     if (!text || !text.trim()) {
-      throw new Error('No readable text found in image. Please ensure the image is clear and readable.');
+      throw new Error('Unable to analyze the image. Please try again.');
     }
 
-    // Process extracted OCR text using extractAiProfile
     const profile = await extractAiProfile(text);
     onProgress?.(100);
     return profile;
   } catch (err: any) {
-    console.error('Tesseract OCR failed:', err);
-    throw new Error(err.message || 'Failed to perform OCR on uploaded image. Please try a clearer image or paste text manually.');
+    console.error('Vision OCR processing error:', err);
+    throw new Error('Unable to analyze the image. Please try again.');
   }
 }
 

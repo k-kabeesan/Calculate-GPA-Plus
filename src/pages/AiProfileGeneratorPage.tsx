@@ -18,7 +18,6 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { extractAiProfile, extractAiProfileFromImage, createProfile } from '../services/dbService';
-import type { Semester } from '../types';
 
 interface AiProfileGeneratorPageProps {
   onProfileCreated: (profileId: string) => void;
@@ -65,8 +64,10 @@ PDEV2110 - Career Development II - 0 Credits`;
 
   const handleFileChange = (file: File | null) => {
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setError('Please upload a valid image file (.png, .jpg, .jpeg, .webp).');
+    const validExtensions = ['jpg', 'jpeg', 'png', 'webp'];
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    if (!file.type.startsWith('image/') && !validExtensions.includes(ext)) {
+      setError('Please upload a valid image file (.jpg, .jpeg, .png, .webp).');
       return;
     }
     setError('');
@@ -111,20 +112,20 @@ PDEV2110 - Career Development II - 0 Credits`;
           setLoading(false);
           return;
         }
-        setStatusMessage('Running OCR & Vision processing on your image document...');
+        setStatusMessage('Running OpenRouter Vision AI on your image document...');
         extracted = await extractAiProfileFromImage(selectedFile, (progressPct) => {
           setOcrProgress(progressPct);
         });
       }
 
-      if (!extracted || (!extracted.semesters || extracted.semesters.length === 0)) {
+      if (!extracted || (!extracted.subjects || extracted.subjects.length === 0)) {
         throw new Error('Could not identify academic subjects from the input. Please verify your text/image.');
       }
 
       setReviewProfile(extracted);
     } catch (err: any) {
       console.error('Extraction error:', err);
-      setError(err.message || 'Failed to extract profile information. Please check your input and try again.');
+      setError(err.message || 'The AI response was incomplete. Please try again.');
     } finally {
       setLoading(false);
       setOcrProgress(0);
@@ -138,33 +139,31 @@ PDEV2110 - Career Development II - 0 Credits`;
     setError('');
 
     try {
-      const pName = (reviewProfile.profile_name || '').replace(/Not detected/g, '').trim();
+      const pName = (reviewProfile.profileName || '').trim();
       if (!pName) {
         setError('Profile Name is required. Please enter a valid profile name.');
         setSubmitting(false);
         return;
       }
 
-      const uName = (reviewProfile.university || '').replace(/Not detected/g, '').trim();
-      const fName = (reviewProfile.faculty || '').replace(/Not detected/g, '').trim();
-      const deptName = (reviewProfile.department || '').replace(/Not detected/g, '').trim();
-      const yearName = (reviewProfile.academic_year || '').replace(/Not detected/g, '').trim();
+      const uName = (reviewProfile.university || '').trim();
+      const fName = (reviewProfile.faculty || '').trim();
+      const deptName = (reviewProfile.department || '').trim();
+      const yearName = (reviewProfile.academicYear || '').trim();
+      const semName = (reviewProfile.semester || 'Semester 1').trim();
 
       // Check strict credit requirement: Every subject/module MUST have a valid credit (0, 1, 2, 3, etc.)
       let missingCreditSubjectName = '';
-      for (const sem of reviewProfile.semesters || []) {
-        for (const sub of sem.subjects || []) {
-          const code = sub.subject_code === 'Not detected' ? '' : (sub.subject_code || '').trim();
-          const name = sub.subject_name === 'Not detected' ? '' : (sub.subject_name || '').trim();
-          if (code || name) {
-            const hasValidCredit = sub.credit !== null && sub.credit !== undefined && sub.credit !== '' && !isNaN(Number(sub.credit)) && Number(sub.credit) >= 0;
-            if (!hasValidCredit) {
-              missingCreditSubjectName = name || code || 'Untitled Subject';
-              break;
-            }
+      for (const sub of reviewProfile.subjects || []) {
+        const code = (sub.moduleNumber || '').trim();
+        const name = (sub.subjectName || '').trim();
+        if (code || name) {
+          const hasValidCredit = sub.credit !== null && sub.credit !== undefined && sub.credit !== '' && !isNaN(Number(sub.credit)) && Number(sub.credit) >= 0;
+          if (!hasValidCredit) {
+            missingCreditSubjectName = name || code || 'Untitled Subject';
+            break;
           }
         }
-        if (missingCreditSubjectName) break;
       }
 
       if (missingCreditSubjectName) {
@@ -173,17 +172,13 @@ PDEV2110 - Career Development II - 0 Credits`;
         return;
       }
 
-      const cleanedSemesters: Semester[] = (reviewProfile.semesters || []).map((sem: any, semIdx: number) => ({
-        semester_name: sem.semester_name || `Semester ${semIdx + 1}`,
-        semester_order: semIdx + 1,
-        subjects: (sem.subjects || [])
-          .map((sub: any) => ({
-            subject_code: sub.subject_code === 'Not detected' ? '' : (sub.subject_code || '').trim(),
-            subject_name: sub.subject_name === 'Not detected' ? '' : (sub.subject_name || '').trim(),
-            credit: Number(sub.credit)
-          }))
-          .filter((sub: any) => (sub.subject_name || sub.subject_code) && !isNaN(sub.credit) && sub.credit >= 0)
-      }));
+      const cleanedSubjects = (reviewProfile.subjects || [])
+        .map((sub: any) => ({
+          subject_code: (sub.moduleNumber || '').trim(),
+          subject_name: (sub.subjectName || '').trim(),
+          credit: Number(sub.credit)
+        }))
+        .filter((sub: any) => (sub.subject_name || sub.subject_code) && !isNaN(sub.credit) && sub.credit >= 0);
 
       const res = await createProfile({
         profile_name: pName,
@@ -193,7 +188,13 @@ PDEV2110 - Career Development II - 0 Credits`;
         academic_year: yearName,
         description: 'Profile created using AI Profile Generator.',
         visibility: 'public',
-        semesters: cleanedSemesters
+        semesters: [
+          {
+            semester_name: semName,
+            semester_order: 1,
+            subjects: cleanedSubjects
+          }
+        ]
       });
 
       setCreatedProfileId(res.id);
@@ -216,14 +217,12 @@ PDEV2110 - Career Development II - 0 Credits`;
 
   // Check if current review profile has any unassigned credit subjects (0 is VALID!)
   const getMissingCreditsCount = (): number => {
-    if (!reviewProfile || !reviewProfile.semesters) return 0;
+    if (!reviewProfile || !reviewProfile.subjects) return 0;
     let count = 0;
-    for (const sem of reviewProfile.semesters) {
-      for (const sub of sem.subjects || []) {
-        if ((sub.subject_name || sub.subject_code)) {
-          const isMissing = sub.credit === null || sub.credit === undefined || sub.credit === '' || isNaN(Number(sub.credit)) || Number(sub.credit) < 0;
-          if (isMissing) count++;
-        }
+    for (const sub of reviewProfile.subjects) {
+      if (sub.subjectName || sub.moduleNumber) {
+        const isMissing = sub.credit === null || sub.credit === undefined || sub.credit === '' || isNaN(Number(sub.credit)) || Number(sub.credit) < 0;
+        if (isMissing) count++;
       }
     }
     return count;
@@ -318,7 +317,7 @@ PDEV2110 - Career Development II - 0 Credits`;
                 <textarea
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
-                  placeholder={`Paste your university course details, syllabus, or result list here...\n\nExample:\nUniversity of Colombo - Faculty of Science\nCS101 Intro to Computer Science - 3.0 Credits\nCS102 Data Structures - 3 Credits`}
+                  placeholder={`Paste your university course details, syllabus, or result list here...\n\nExample:\nNANO01232 Fundamentals of Physics II\nNANO01242 Computer Programming\nETCH1210 English For Technology II\nPDEV1210 Career Development I`}
                   rows={10}
                   className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none font-mono"
                 />
@@ -524,8 +523,8 @@ PDEV2110 - Career Development II - 0 Credits`;
                     </label>
                     <input
                       type="text"
-                      value={reviewProfile.profile_name === 'Not detected' ? '' : (reviewProfile.profile_name || '')}
-                      onChange={(e) => setReviewProfile({ ...reviewProfile, profile_name: e.target.value })}
+                      value={reviewProfile.profileName || ''}
+                      onChange={(e) => setReviewProfile({ ...reviewProfile, profileName: e.target.value })}
                       placeholder="e.g. BSc Computer Science - Batch 2024"
                       className="w-full px-3 py-2 border border-indigo-300 rounded-xl text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
@@ -535,7 +534,7 @@ PDEV2110 - Career Development II - 0 Credits`;
                     <label className="text-xs font-bold text-slate-700 block">University</label>
                     <input
                       type="text"
-                      value={reviewProfile.university === 'Not detected' ? '' : (reviewProfile.university || '')}
+                      value={reviewProfile.university || ''}
                       onChange={(e) => setReviewProfile({ ...reviewProfile, university: e.target.value })}
                       placeholder="University Name"
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold bg-white"
@@ -546,7 +545,7 @@ PDEV2110 - Career Development II - 0 Credits`;
                     <label className="text-xs font-bold text-slate-700 block">Faculty</label>
                     <input
                       type="text"
-                      value={reviewProfile.faculty === 'Not detected' ? '' : (reviewProfile.faculty || '')}
+                      value={reviewProfile.faculty || ''}
                       onChange={(e) => setReviewProfile({ ...reviewProfile, faculty: e.target.value })}
                       placeholder="Faculty Name"
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold bg-white"
@@ -557,7 +556,7 @@ PDEV2110 - Career Development II - 0 Credits`;
                     <label className="text-xs font-bold text-slate-700 block">Department</label>
                     <input
                       type="text"
-                      value={reviewProfile.department === 'Not detected' ? '' : (reviewProfile.department || '')}
+                      value={reviewProfile.department || ''}
                       onChange={(e) => setReviewProfile({ ...reviewProfile, department: e.target.value })}
                       placeholder="Department Name"
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold bg-white"
@@ -568,160 +567,136 @@ PDEV2110 - Career Development II - 0 Credits`;
                     <label className="text-xs font-bold text-slate-700 block">Academic Year</label>
                     <input
                       type="text"
-                      value={reviewProfile.academic_year === 'Not detected' ? '' : (reviewProfile.academic_year || '')}
-                      onChange={(e) => setReviewProfile({ ...reviewProfile, academic_year: e.target.value })}
+                      value={reviewProfile.academicYear || ''}
+                      onChange={(e) => setReviewProfile({ ...reviewProfile, academicYear: e.target.value })}
                       placeholder="e.g. 2024/2025"
+                      className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold bg-white"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700 block">Semester</label>
+                    <input
+                      type="text"
+                      value={reviewProfile.semester || ''}
+                      onChange={(e) => setReviewProfile({ ...reviewProfile, semester: e.target.value })}
+                      placeholder="e.g. Semester 1"
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold bg-white"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Subjects & Semesters Section */}
+              {/* Subjects Section */}
               <div className="space-y-4 pt-2">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-extrabold uppercase tracking-wider text-indigo-600">Extracted Subjects & Modules</h3>
                   <button
                     type="button"
                     onClick={() => {
-                      const newSem = {
-                        semester_name: `Semester ${(reviewProfile.semesters?.length || 0) + 1}`,
-                        subjects: [{ subject_code: '', subject_name: '', credit: 0 }]
-                      };
-                      setReviewProfile({
-                        ...reviewProfile,
-                        semesters: [...(reviewProfile.semesters || []), newSem]
-                      });
+                      const updatedSubs = [...(reviewProfile.subjects || []), { moduleNumber: '', subjectName: '', credit: null }];
+                      setReviewProfile({ ...reviewProfile, subjects: updatedSubs });
                     }}
                     className="text-xs font-bold text-indigo-600 hover:underline flex items-center space-x-1"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>Add Semester</span>
+                    <span>Add Subject</span>
                   </button>
                 </div>
 
-                {(reviewProfile.semesters || []).map((sem: any, semIdx: number) => (
-                  <div key={semIdx} className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <input
-                        type="text"
-                        value={sem.semester_name || ''}
-                        onChange={(e) => {
-                          const updatedSems = [...reviewProfile.semesters];
-                          updatedSems[semIdx].semester_name = e.target.value;
-                          setReviewProfile({ ...reviewProfile, semesters: updatedSems });
-                        }}
-                        className="px-2.5 py-1 bg-white border border-slate-300 rounded-lg text-xs font-extrabold text-slate-900"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const updatedSems = [...reviewProfile.semesters];
-                          updatedSems[semIdx].subjects.push({ subject_code: '', subject_name: '', credit: 0 });
-                          setReviewProfile({ ...reviewProfile, semesters: updatedSems });
-                        }}
-                        className="text-xs font-bold text-indigo-600 hover:underline flex items-center space-x-1"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Add Subject</span>
-                      </button>
-                    </div>
-
-                    {/* Subjects Table */}
-                    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-xs">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead>
-                          <tr className="bg-slate-100 text-slate-700 border-b border-slate-200 font-extrabold">
-                            <th className="py-2.5 px-3 w-1/4">Module Number</th>
-                            <th className="py-2.5 px-3 w-1/2">Subject Name</th>
-                            <th className="py-2.5 px-3 w-1/4 text-right">Credit</th>
-                            <th className="py-2.5 px-3 w-10 text-center">Action</th>
+                {/* Subjects Table */}
+                <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-xs">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-700 border-b border-slate-200 font-extrabold">
+                        <th className="py-2.5 px-3 w-1/4">Module Number</th>
+                        <th className="py-2.5 px-3 w-1/2">Subject Name</th>
+                        <th className="py-2.5 px-3 w-1/4 text-right">Credit</th>
+                        <th className="py-2.5 px-3 w-10 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {(reviewProfile.subjects || []).map((sub: any, subIdx: number) => {
+                        const isCreditMissing = (sub.credit === null || sub.credit === undefined || sub.credit === '' || isNaN(Number(sub.credit))) && (sub.subjectName || sub.moduleNumber);
+                        return (
+                          <tr key={subIdx} className={`hover:bg-slate-50/80 transition-colors ${isCreditMissing ? 'bg-amber-50/30' : ''}`}>
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                placeholder="e.g. NANO01232"
+                                value={sub.moduleNumber || ''}
+                                onChange={(e) => {
+                                  const updatedSubs = [...reviewProfile.subjects];
+                                  updatedSubs[subIdx].moduleNumber = e.target.value;
+                                  setReviewProfile({ ...reviewProfile, subjects: updatedSubs });
+                                }}
+                                className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg font-mono text-xs font-semibold uppercase"
+                              />
+                            </td>
+                            <td className="p-2">
+                              <input
+                                type="text"
+                                placeholder="Subject Name"
+                                value={sub.subjectName || ''}
+                                onChange={(e) => {
+                                  const updatedSubs = [...reviewProfile.subjects];
+                                  updatedSubs[subIdx].subjectName = e.target.value;
+                                  setReviewProfile({ ...reviewProfile, subjects: updatedSubs });
+                                }}
+                                className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold"
+                              />
+                            </td>
+                            <td className="p-2 text-right">
+                              <div className="flex flex-col items-end space-y-1">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.5"
+                                  placeholder="Credit"
+                                  value={sub.credit === null || sub.credit === undefined || sub.credit === '' ? '' : sub.credit}
+                                  onChange={(e) => {
+                                    const updatedSubs = [...reviewProfile.subjects];
+                                    const rawVal = e.target.value;
+                                    if (rawVal === '') {
+                                      updatedSubs[subIdx].credit = null;
+                                    } else {
+                                      const parsed = parseFloat(rawVal);
+                                      updatedSubs[subIdx].credit = !isNaN(parsed) && parsed >= 0 ? parsed : null;
+                                    }
+                                    setReviewProfile({ ...reviewProfile, subjects: updatedSubs });
+                                  }}
+                                  className={`w-20 px-2 py-1.5 rounded-lg text-xs font-bold text-right transition-colors ${
+                                    isCreditMissing
+                                      ? 'border-2 border-amber-500 bg-amber-50 focus:ring-amber-500'
+                                      : 'bg-slate-50 border border-slate-200'
+                                  }`}
+                                />
+                                {isCreditMissing && (
+                                  <span className="text-[10px] font-extrabold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300 shrink-0">
+                                    Credit Required
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="p-2 text-center">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updatedSubs = reviewProfile.subjects.filter((_: any, i: number) => i !== subIdx);
+                                  setReviewProfile({ ...reviewProfile, subjects: updatedSubs });
+                                }}
+                                aria-label={`Delete ${sub.subjectName || sub.moduleNumber || 'subject'}`}
+                                className="p-1.5 text-slate-400 hover:text-red-600 rounded-md transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
                           </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {sem.subjects.map((sub: any, subIdx: number) => {
-                            const isCreditMissing = (sub.credit === null || sub.credit === undefined || sub.credit === '' || isNaN(Number(sub.credit))) && (sub.subject_name || sub.subject_code);
-                            return (
-                              <tr key={subIdx} className={`hover:bg-slate-50/80 transition-colors ${isCreditMissing ? 'bg-amber-50/30' : ''}`}>
-                                <td className="p-2">
-                                  <input
-                                    type="text"
-                                    placeholder="e.g. CS101"
-                                    value={sub.subject_code === 'Not detected' ? '' : (sub.subject_code || '')}
-                                    onChange={(e) => {
-                                      const updatedSems = [...reviewProfile.semesters];
-                                      updatedSems[semIdx].subjects[subIdx].subject_code = e.target.value;
-                                      setReviewProfile({ ...reviewProfile, semesters: updatedSems });
-                                    }}
-                                    className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg font-mono text-xs font-semibold uppercase"
-                                  />
-                                </td>
-                                <td className="p-2">
-                                  <input
-                                    type="text"
-                                    placeholder="Subject Name"
-                                    value={sub.subject_name === 'Not detected' ? '' : (sub.subject_name || '')}
-                                    onChange={(e) => {
-                                      const updatedSems = [...reviewProfile.semesters];
-                                      updatedSems[semIdx].subjects[subIdx].subject_name = e.target.value;
-                                      setReviewProfile({ ...reviewProfile, semesters: updatedSems });
-                                    }}
-                                    className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold"
-                                  />
-                                </td>
-                                <td className="p-2 text-right">
-                                  <div className="flex flex-col items-end space-y-1">
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step="0.5"
-                                      placeholder="Credit"
-                                      value={sub.credit === null || sub.credit === undefined || sub.credit === '' ? '' : sub.credit}
-                                      onChange={(e) => {
-                                        const updatedSems = [...reviewProfile.semesters];
-                                        const rawVal = e.target.value;
-                                        if (rawVal === '') {
-                                          updatedSems[semIdx].subjects[subIdx].credit = null;
-                                        } else {
-                                          const parsed = parseFloat(rawVal);
-                                          updatedSems[semIdx].subjects[subIdx].credit = !isNaN(parsed) && parsed >= 0 ? parsed : null;
-                                        }
-                                        setReviewProfile({ ...reviewProfile, semesters: updatedSems });
-                                      }}
-                                      className={`w-20 px-2 py-1.5 rounded-lg text-xs font-bold text-right transition-colors ${
-                                        isCreditMissing
-                                          ? 'border-2 border-amber-500 bg-amber-50 focus:ring-amber-500'
-                                          : 'bg-slate-50 border border-slate-200'
-                                      }`}
-                                    />
-                                    {isCreditMissing && (
-                                      <span className="text-[10px] font-extrabold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300 shrink-0">
-                                        Credit Required
-                                      </span>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className="p-2 text-center">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const updatedSems = [...reviewProfile.semesters];
-                                      updatedSems[semIdx].subjects = updatedSems[semIdx].subjects.filter((_: any, i: number) => i !== subIdx);
-                                      setReviewProfile({ ...reviewProfile, semesters: updatedSems });
-                                    }}
-                                    className="p-1.5 text-slate-400 hover:text-red-600 rounded-md transition-colors"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                ))}
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               {/* Final Action Bar */}
@@ -737,7 +712,7 @@ PDEV2110 - Career Development II - 0 Credits`;
                 <button
                   type="button"
                   onClick={handleCreateFinalProfile}
-                  disabled={submitting || missingCreditsCount > 0 || !reviewProfile.profile_name?.trim()}
+                  disabled={submitting || missingCreditsCount > 0 || !reviewProfile.profileName?.trim()}
                   className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center space-x-2 shadow-md transition-transform active:scale-95"
                 >
                   {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}

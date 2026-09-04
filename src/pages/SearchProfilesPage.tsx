@@ -1,5 +1,20 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Search, Filter, ChevronDown, ArrowRight, Loader2, RotateCcw, X, Building2, GraduationCap, BookOpen, Layers, Calendar } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  Search,
+  Filter,
+  ChevronDown,
+  ArrowRight,
+  Loader2,
+  RotateCcw,
+  X,
+  Building2,
+  GraduationCap,
+  BookOpen,
+  Layers,
+  Calendar,
+  AlertCircle,
+  ArrowUpDown
+} from 'lucide-react';
 import { fetchPublicProfiles, fetchFilterOptions, type ProfileFilterParams } from '../services/dbService';
 
 interface SearchProfilesPageProps {
@@ -20,6 +35,7 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
   const [selectedDegree, setSelectedDegree] = useState('');
   const [selectedAcademicYear, setSelectedAcademicYear] = useState('');
   const [selectedSemester, setSelectedSemester] = useState('');
+  const [sortBy, setSortBy] = useState<'newest' | 'university_asc' | 'faculty_asc'>('newest');
 
   const [openPopover, setOpenPopover] = useState<PopoverType>(null);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
@@ -63,24 +79,7 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
       .catch(() => {});
   }, []);
 
-  // Debounced search trigger when inputs/filters change
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      loadProfiles();
-    }, 300);
-
-    return () => clearTimeout(handler);
-  }, [
-    searchQuery,
-    selectedUniversity,
-    selectedFaculty,
-    selectedDepartment,
-    selectedDegree,
-    selectedAcademicYear,
-    selectedSemester
-  ]);
-
-  const loadProfiles = async () => {
+  const loadProfiles = useCallback(async () => {
     setLoading(true);
     setError('');
 
@@ -91,17 +90,35 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
         faculty: selectedFaculty,
         department: selectedDepartment,
         academicYear: selectedAcademicYear,
-        semester: selectedSemester
+        semester: selectedSemester,
+        sort: sortBy
       };
 
       const data = await fetchPublicProfiles(filterParams);
-      setProfiles(data || []);
+      setProfiles(Array.isArray(data) ? data : []);
     } catch (err: any) {
-      setError(err.message || 'Failed to search profiles.');
+      setError(err?.message || 'Failed to search profiles. Please check your connection and try again.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [
+    searchQuery,
+    selectedUniversity,
+    selectedFaculty,
+    selectedDepartment,
+    selectedAcademicYear,
+    selectedSemester,
+    sortBy
+  ]);
+
+  // Debounced search trigger when inputs/filters change
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      loadProfiles();
+    }, 300);
+
+    return () => clearTimeout(handler);
+  }, [loadProfiles]);
 
   const handleResetFilters = () => {
     setSearchQuery('');
@@ -111,7 +128,12 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
     setSelectedDegree('');
     setSelectedAcademicYear('');
     setSelectedSemester('');
+    setSortBy('newest');
     setOpenPopover(null);
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery('');
   };
 
   const activeFilterCount = [
@@ -123,7 +145,7 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
     selectedSemester
   ].filter(Boolean).length;
 
-  const hasActiveFilters = Boolean(searchQuery || activeFilterCount > 0);
+  const hasActiveFilters = Boolean(searchQuery || activeFilterCount > 0 || sortBy !== 'newest');
 
   return (
     <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-8 animate-fade-in text-slate-900" ref={containerRef}>
@@ -131,23 +153,27 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
       <div className="space-y-4 text-center max-w-3xl mx-auto">
         <h1 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">Search Profiles</h1>
         <p className="text-sm text-slate-600">
-          Find pre-built university profiles with fixed subjects and credits. Search by name or filter by university, faculty, department, degree, academic year, or semester.
+          Find pre-built university profiles with fixed subjects and credits. Search by profile name, module code, or filter by university, faculty, department, academic year, or semester.
         </p>
 
-        {/* 🔍 Search profile by name... input */}
+        {/* Search input */}
         <div className="relative max-w-2xl mx-auto pt-2">
+          <label htmlFor="search-profiles-input" className="sr-only">Search profiles by name or module code</label>
           <Search className="absolute left-4 top-5 w-5 h-5 text-slate-400" />
           <input
+            id="search-profiles-input"
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search profile by name..."
-            className="w-full pl-12 pr-10 py-3.5 bg-white border border-slate-300 rounded-full text-slate-900 placeholder-slate-400 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs transition-all"
+            placeholder="Search by profile name or module code (e.g. NANO2112)..."
+            className="w-full pl-12 pr-12 py-3.5 bg-white border border-slate-300 rounded-full text-slate-900 placeholder-slate-400 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-xs transition-all"
           />
           {searchQuery && (
             <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-4 top-5 text-slate-400 hover:text-slate-600"
+              type="button"
+              onClick={handleClearSearch}
+              aria-label="Clear Search"
+              className="absolute right-4 top-5 text-slate-400 hover:text-slate-600 transition-colors"
             >
               <X className="w-4 h-4" />
             </button>
@@ -157,202 +183,235 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
 
       {/* Horizontal Pill-Shaped Filter Buttons Row */}
       <div className="space-y-4 bg-white p-4 sm:p-6 rounded-3xl border border-slate-200 shadow-xs">
-        <div className="flex items-center space-x-2 overflow-x-auto py-1.5 no-scrollbar scroll-smooth">
-          {/* Filters Toggle Pill */}
-          <button
-            onClick={() => {
-              setShowFilterPanel(!showFilterPanel);
-              setOpenPopover(null);
-            }}
-            className={`px-4 py-2 rounded-full text-xs font-extrabold flex items-center space-x-1.5 shrink-0 border transition-all ${
-              showFilterPanel || activeFilterCount > 0
-                ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
-            }`}
-          >
-            <Filter className="w-3.5 h-3.5" />
-            <span>Filters</span>
-            {activeFilterCount > 0 && (
-              <span className="ml-1 px-1.5 py-0.5 bg-white/20 rounded-full text-[10px] font-black">
-                {activeFilterCount}
-              </span>
-            )}
-          </button>
-
-          {/* University Pill */}
-          <div className="relative shrink-0">
+        <div className="flex items-center justify-between gap-3 flex-wrap sm:flex-nowrap">
+          <div className="flex items-center space-x-2 overflow-x-auto py-1.5 no-scrollbar scroll-smooth flex-1">
+            {/* Filters Toggle Pill */}
             <button
-              onClick={() => setOpenPopover(openPopover === 'university' ? null : 'university')}
-              className={`px-4 py-2 rounded-full text-xs font-semibold flex items-center space-x-1.5 border transition-all ${
-                selectedUniversity
+              type="button"
+              onClick={() => {
+                setShowFilterPanel(!showFilterPanel);
+                setOpenPopover(null);
+              }}
+              className={`px-4 py-2 rounded-full text-xs font-extrabold flex items-center space-x-1.5 shrink-0 border transition-all ${
+                showFilterPanel || activeFilterCount > 0
                   ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
                   : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
               }`}
             >
-              <span>{selectedUniversity ? `Uni: ${selectedUniversity}` : 'University'}</span>
-              <ChevronDown className="w-3.5 h-3.5" />
+              <Filter className="w-3.5 h-3.5" />
+              <span>Filters</span>
+              {activeFilterCount > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 bg-white/20 rounded-full text-[10px] font-black">
+                  {activeFilterCount}
+                </span>
+              )}
             </button>
 
-            {openPopover === 'university' && (
-              <div className="absolute left-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-30 max-h-60 overflow-y-auto animate-fade-in">
-                <button
-                  onClick={() => { setSelectedUniversity(''); setOpenPopover(null); }}
-                  className={`w-full text-left px-4 py-2 text-xs font-semibold ${!selectedUniversity ? 'text-indigo-600 bg-indigo-50 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
-                >
-                  All Universities
-                </button>
-                {filterOptions.universities.map((u) => (
+            {/* University Pill */}
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => setOpenPopover(openPopover === 'university' ? null : 'university')}
+                className={`px-4 py-2 rounded-full text-xs font-semibold flex items-center space-x-1.5 border transition-all ${
+                  selectedUniversity
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                }`}
+              >
+                <span>{selectedUniversity ? `Uni: ${selectedUniversity}` : 'University'}</span>
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+
+              {openPopover === 'university' && (
+                <div className="absolute left-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-30 max-h-60 overflow-y-auto animate-fade-in">
                   <button
-                    key={u}
-                    onClick={() => { setSelectedUniversity(u); setOpenPopover(null); }}
-                    className={`w-full text-left px-4 py-2 text-xs truncate font-medium ${selectedUniversity === u ? 'text-indigo-600 bg-indigo-50 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
+                    type="button"
+                    onClick={() => { setSelectedUniversity(''); setOpenPopover(null); }}
+                    className={`w-full text-left px-4 py-2 text-xs font-semibold ${!selectedUniversity ? 'text-indigo-600 bg-indigo-50 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
                   >
-                    {u}
+                    All Universities
                   </button>
-                ))}
-              </div>
-            )}
+                  {filterOptions.universities.map((u) => (
+                    <button
+                      key={u}
+                      type="button"
+                      onClick={() => { setSelectedUniversity(u); setOpenPopover(null); }}
+                      className={`w-full text-left px-4 py-2 text-xs truncate font-medium ${selectedUniversity === u ? 'text-indigo-600 bg-indigo-50 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
+                    >
+                      {u}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Faculty Pill */}
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => setOpenPopover(openPopover === 'faculty' ? null : 'faculty')}
+                className={`px-4 py-2 rounded-full text-xs font-semibold flex items-center space-x-1.5 border transition-all ${
+                  selectedFaculty
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                }`}
+              >
+                <span>{selectedFaculty ? `Faculty: ${selectedFaculty}` : 'Faculty'}</span>
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+
+              {openPopover === 'faculty' && (
+                <div className="absolute left-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-30 max-h-60 overflow-y-auto animate-fade-in">
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedFaculty(''); setOpenPopover(null); }}
+                    className={`w-full text-left px-4 py-2 text-xs font-semibold ${!selectedFaculty ? 'text-indigo-600 bg-indigo-50 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
+                  >
+                    All Faculties
+                  </button>
+                  {filterOptions.faculties.map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      onClick={() => { setSelectedFaculty(f); setOpenPopover(null); }}
+                      className={`w-full text-left px-4 py-2 text-xs truncate font-medium ${selectedFaculty === f ? 'text-indigo-600 bg-indigo-50 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Department Pill */}
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => setOpenPopover(openPopover === 'department' ? null : 'department')}
+                className={`px-4 py-2 rounded-full text-xs font-semibold flex items-center space-x-1.5 border transition-all ${
+                  selectedDepartment
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                }`}
+              >
+                <span>{selectedDepartment ? `Dept: ${selectedDepartment}` : 'Department'}</span>
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+
+              {openPopover === 'department' && (
+                <div className="absolute left-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-30 max-h-60 overflow-y-auto animate-fade-in">
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedDepartment(''); setOpenPopover(null); }}
+                    className={`w-full text-left px-4 py-2 text-xs font-semibold ${!selectedDepartment ? 'text-indigo-600 bg-indigo-50 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
+                  >
+                    All Departments
+                  </button>
+                  {filterOptions.departments.map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => { setSelectedDepartment(d); setOpenPopover(null); }}
+                      className={`w-full text-left px-4 py-2 text-xs truncate font-medium ${selectedDepartment === d ? 'text-indigo-600 bg-indigo-50 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Academic Year Pill */}
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => setOpenPopover(openPopover === 'year' ? null : 'year')}
+                className={`px-4 py-2 rounded-full text-xs font-semibold flex items-center space-x-1.5 border transition-all ${
+                  selectedAcademicYear
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                }`}
+              >
+                <span>{selectedAcademicYear ? `Year: ${selectedAcademicYear}` : 'Academic Year'}</span>
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+
+              {openPopover === 'year' && (
+                <div className="absolute left-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-30 max-h-60 overflow-y-auto animate-fade-in">
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedAcademicYear(''); setOpenPopover(null); }}
+                    className={`w-full text-left px-4 py-2 text-xs font-semibold ${!selectedAcademicYear ? 'text-indigo-600 bg-indigo-50 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
+                  >
+                    All Academic Years
+                  </button>
+                  {filterOptions.academicYears.map((y) => (
+                    <button
+                      key={y}
+                      type="button"
+                      onClick={() => { setSelectedAcademicYear(y); setOpenPopover(null); }}
+                      className={`w-full text-left px-4 py-2 text-xs truncate font-medium ${selectedAcademicYear === y ? 'text-indigo-600 bg-indigo-50 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
+                    >
+                      {y}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Semester Pill */}
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => setOpenPopover(openPopover === 'semester' ? null : 'semester')}
+                className={`px-4 py-2 rounded-full text-xs font-semibold flex items-center space-x-1.5 border transition-all ${
+                  selectedSemester
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                }`}
+              >
+                <span>{selectedSemester ? `Sem: ${selectedSemester}` : 'Semester'}</span>
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+
+              {openPopover === 'semester' && (
+                <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 p-3 z-30 animate-fade-in space-y-2">
+                  <span className="text-xs font-bold text-slate-700 block">Filter by Semester</span>
+                  <input
+                    type="text"
+                    placeholder="e.g. Semester 1"
+                    value={selectedSemester}
+                    onChange={(e) => setSelectedSemester(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  {selectedSemester && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedSemester('')}
+                      className="text-[11px] font-bold text-red-600 hover:underline block text-right"
+                    >
+                      Reset Semester Filter
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Faculty Pill */}
-          <div className="relative shrink-0">
-            <button
-              onClick={() => setOpenPopover(openPopover === 'faculty' ? null : 'faculty')}
-              className={`px-4 py-2 rounded-full text-xs font-semibold flex items-center space-x-1.5 border transition-all ${
-                selectedFaculty
-                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
-              }`}
+          {/* Sort Dropdown */}
+          <div className="flex items-center space-x-2 shrink-0">
+            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+            <label htmlFor="search-sort-select" className="text-xs font-bold text-slate-500 sr-only">Sort by</label>
+            <select
+              id="search-sort-select"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             >
-              <span>{selectedFaculty ? `Faculty: ${selectedFaculty}` : 'Faculty'}</span>
-              <ChevronDown className="w-3.5 h-3.5" />
-            </button>
-
-            {openPopover === 'faculty' && (
-              <div className="absolute left-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-30 max-h-60 overflow-y-auto animate-fade-in">
-                <button
-                  onClick={() => { setSelectedFaculty(''); setOpenPopover(null); }}
-                  className={`w-full text-left px-4 py-2 text-xs font-semibold ${!selectedFaculty ? 'text-indigo-600 bg-indigo-50 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
-                >
-                  All Faculties
-                </button>
-                {filterOptions.faculties.map((f) => (
-                  <button
-                    key={f}
-                    onClick={() => { setSelectedFaculty(f); setOpenPopover(null); }}
-                    className={`w-full text-left px-4 py-2 text-xs truncate font-medium ${selectedFaculty === f ? 'text-indigo-600 bg-indigo-50 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
-                  >
-                    {f}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Department Pill */}
-          <div className="relative shrink-0">
-            <button
-              onClick={() => setOpenPopover(openPopover === 'department' ? null : 'department')}
-              className={`px-4 py-2 rounded-full text-xs font-semibold flex items-center space-x-1.5 border transition-all ${
-                selectedDepartment
-                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
-              }`}
-            >
-              <span>{selectedDepartment ? `Dept: ${selectedDepartment}` : 'Department'}</span>
-              <ChevronDown className="w-3.5 h-3.5" />
-            </button>
-
-            {openPopover === 'department' && (
-              <div className="absolute left-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-30 max-h-60 overflow-y-auto animate-fade-in">
-                <button
-                  onClick={() => { setSelectedDepartment(''); setOpenPopover(null); }}
-                  className={`w-full text-left px-4 py-2 text-xs font-semibold ${!selectedDepartment ? 'text-indigo-600 bg-indigo-50 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
-                >
-                  All Departments
-                </button>
-                {filterOptions.departments.map((d) => (
-                  <button
-                    key={d}
-                    onClick={() => { setSelectedDepartment(d); setOpenPopover(null); }}
-                    className={`w-full text-left px-4 py-2 text-xs truncate font-medium ${selectedDepartment === d ? 'text-indigo-600 bg-indigo-50 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
-                  >
-                    {d}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Academic Year Pill */}
-          <div className="relative shrink-0">
-            <button
-              onClick={() => setOpenPopover(openPopover === 'year' ? null : 'year')}
-              className={`px-4 py-2 rounded-full text-xs font-semibold flex items-center space-x-1.5 border transition-all ${
-                selectedAcademicYear
-                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
-              }`}
-            >
-              <span>{selectedAcademicYear ? `Year: ${selectedAcademicYear}` : 'Academic Year'}</span>
-              <ChevronDown className="w-3.5 h-3.5" />
-            </button>
-
-            {openPopover === 'year' && (
-              <div className="absolute left-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-30 max-h-60 overflow-y-auto animate-fade-in">
-                <button
-                  onClick={() => { setSelectedAcademicYear(''); setOpenPopover(null); }}
-                  className={`w-full text-left px-4 py-2 text-xs font-semibold ${!selectedAcademicYear ? 'text-indigo-600 bg-indigo-50 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
-                >
-                  All Academic Years
-                </button>
-                {filterOptions.academicYears.map((y) => (
-                  <button
-                    key={y}
-                    onClick={() => { setSelectedAcademicYear(y); setOpenPopover(null); }}
-                    className={`w-full text-left px-4 py-2 text-xs truncate font-medium ${selectedAcademicYear === y ? 'text-indigo-600 bg-indigo-50 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
-                  >
-                    {y}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Semester Pill */}
-          <div className="relative shrink-0">
-            <button
-              onClick={() => setOpenPopover(openPopover === 'semester' ? null : 'semester')}
-              className={`px-4 py-2 rounded-full text-xs font-semibold flex items-center space-x-1.5 border transition-all ${
-                selectedSemester
-                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
-              }`}
-            >
-              <span>{selectedSemester ? `Sem: ${selectedSemester}` : 'Semester'}</span>
-              <ChevronDown className="w-3.5 h-3.5" />
-            </button>
-
-            {openPopover === 'semester' && (
-              <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-200 p-3 z-30 animate-fade-in space-y-2">
-                <span className="text-xs font-bold text-slate-700 block">Filter by Semester</span>
-                <input
-                  type="text"
-                  placeholder="e.g. Semester 1"
-                  value={selectedSemester}
-                  onChange={(e) => setSelectedSemester(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-                {selectedSemester && (
-                  <button
-                    onClick={() => setSelectedSemester('')}
-                    className="text-[11px] font-bold text-red-600 hover:underline block text-right"
-                  >
-                    Reset Semester Filter
-                  </button>
-                )}
-              </div>
-            )}
+              <option value="newest">Newest First</option>
+              <option value="university_asc">University (A–Z)</option>
+              <option value="faculty_asc">Faculty (A–Z)</option>
+            </select>
           </div>
         </div>
 
@@ -360,11 +419,12 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
         {showFilterPanel && (
           <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 animate-fade-in pt-4">
             <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
+              <label htmlFor="panel-select-university" className="text-xs font-bold text-slate-700 flex items-center space-x-1">
                 <Building2 className="w-3.5 h-3.5 text-slate-400" />
                 <span>University</span>
               </label>
               <select
+                id="panel-select-university"
                 value={selectedUniversity}
                 onChange={(e) => setSelectedUniversity(e.target.value)}
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
@@ -377,11 +437,12 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
+              <label htmlFor="panel-select-faculty" className="text-xs font-bold text-slate-700 flex items-center space-x-1">
                 <GraduationCap className="w-3.5 h-3.5 text-slate-400" />
                 <span>Faculty</span>
               </label>
               <select
+                id="panel-select-faculty"
                 value={selectedFaculty}
                 onChange={(e) => setSelectedFaculty(e.target.value)}
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
@@ -394,11 +455,12 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
+              <label htmlFor="panel-select-department" className="text-xs font-bold text-slate-700 flex items-center space-x-1">
                 <Layers className="w-3.5 h-3.5 text-slate-400" />
                 <span>Department</span>
               </label>
               <select
+                id="panel-select-department"
                 value={selectedDepartment}
                 onChange={(e) => setSelectedDepartment(e.target.value)}
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
@@ -411,28 +473,12 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
-                <BookOpen className="w-3.5 h-3.5 text-slate-400" />
-                <span>Degree / Programme</span>
-              </label>
-              <select
-                value={selectedDegree}
-                onChange={(e) => setSelectedDegree(e.target.value)}
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-              >
-                <option value="">All Degrees / Programmes</option>
-                {filterOptions.degrees.map(d => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
+              <label htmlFor="panel-select-year" className="text-xs font-bold text-slate-700 flex items-center space-x-1">
                 <Calendar className="w-3.5 h-3.5 text-slate-400" />
                 <span>Academic Year</span>
               </label>
               <select
+                id="panel-select-year"
                 value={selectedAcademicYear}
                 onChange={(e) => setSelectedAcademicYear(e.target.value)}
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
@@ -445,11 +491,12 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-700 flex items-center space-x-1">
+              <label htmlFor="panel-input-semester" className="text-xs font-bold text-slate-700 flex items-center space-x-1">
                 <BookOpen className="w-3.5 h-3.5 text-slate-400" />
                 <span>Semester</span>
               </label>
               <input
+                id="panel-input-semester"
                 type="text"
                 placeholder="e.g. Semester 1"
                 value={selectedSemester}
@@ -465,10 +512,19 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
           <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
             <span className="text-xs font-bold text-slate-400">Selected Filters:</span>
 
+            {searchQuery && (
+              <span className="inline-flex items-center px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-semibold">
+                Query: "{searchQuery}"
+                <button type="button" onClick={handleClearSearch} className="ml-1.5 text-indigo-500 hover:text-indigo-900">
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+
             {selectedUniversity && (
               <span className="inline-flex items-center px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-semibold">
                 University: {selectedUniversity}
-                <button onClick={() => setSelectedUniversity('')} className="ml-1.5 text-indigo-500 hover:text-indigo-900">
+                <button type="button" onClick={() => setSelectedUniversity('')} className="ml-1.5 text-indigo-500 hover:text-indigo-900">
                   <X className="w-3 h-3" />
                 </button>
               </span>
@@ -477,7 +533,7 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
             {selectedFaculty && (
               <span className="inline-flex items-center px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-semibold">
                 Faculty: {selectedFaculty}
-                <button onClick={() => setSelectedFaculty('')} className="ml-1.5 text-indigo-500 hover:text-indigo-900">
+                <button type="button" onClick={() => setSelectedFaculty('')} className="ml-1.5 text-indigo-500 hover:text-indigo-900">
                   <X className="w-3 h-3" />
                 </button>
               </span>
@@ -486,16 +542,7 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
             {selectedDepartment && (
               <span className="inline-flex items-center px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-semibold">
                 Department: {selectedDepartment}
-                <button onClick={() => setSelectedDepartment('')} className="ml-1.5 text-indigo-500 hover:text-indigo-900">
-                  <X className="w-3 h-3" />
-                </button>
-              </span>
-            )}
-
-            {selectedDegree && (
-              <span className="inline-flex items-center px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-semibold">
-                Degree: {selectedDegree}
-                <button onClick={() => setSelectedDegree('')} className="ml-1.5 text-indigo-500 hover:text-indigo-900">
+                <button type="button" onClick={() => setSelectedDepartment('')} className="ml-1.5 text-indigo-500 hover:text-indigo-900">
                   <X className="w-3 h-3" />
                 </button>
               </span>
@@ -504,7 +551,7 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
             {selectedAcademicYear && (
               <span className="inline-flex items-center px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-semibold">
                 Year: {selectedAcademicYear}
-                <button onClick={() => setSelectedAcademicYear('')} className="ml-1.5 text-indigo-500 hover:text-indigo-900">
+                <button type="button" onClick={() => setSelectedAcademicYear('')} className="ml-1.5 text-indigo-500 hover:text-indigo-900">
                   <X className="w-3 h-3" />
                 </button>
               </span>
@@ -513,18 +560,19 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
             {selectedSemester && (
               <span className="inline-flex items-center px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-xs font-semibold">
                 Semester: {selectedSemester}
-                <button onClick={() => setSelectedSemester('')} className="ml-1.5 text-indigo-500 hover:text-indigo-900">
+                <button type="button" onClick={() => setSelectedSemester('')} className="ml-1.5 text-indigo-500 hover:text-indigo-900">
                   <X className="w-3 h-3" />
                 </button>
               </span>
             )}
 
             <button
+              type="button"
               onClick={handleResetFilters}
               className="text-xs font-bold text-red-600 hover:underline flex items-center space-x-1 ml-2"
             >
               <RotateCcw className="w-3 h-3" />
-              <span>Clear All</span>
+              <span>Clear All Filters</span>
             </button>
           </div>
         )}
@@ -542,25 +590,58 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
           )}
         </div>
 
+        {/* Error state with Retry Button */}
         {error && (
-          <div className="p-4 bg-red-50 text-red-700 text-xs font-semibold rounded-2xl border border-red-200">
-            {error}
+          <div className="p-6 bg-white rounded-2xl border border-rose-200 text-center space-y-3 shadow-xs" role="alert">
+            <div className="w-10 h-10 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+              <AlertCircle className="w-5 h-5" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-sm font-bold text-slate-900">Search Error</h3>
+              <p className="text-xs text-slate-500 max-w-sm mx-auto">{error}</p>
+            </div>
+            <button
+              type="button"
+              onClick={loadProfiles}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold inline-flex items-center space-x-1.5 shadow-xs transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Retry Search</span>
+            </button>
           </div>
         )}
 
+        {/* Loading Skeleton Cards */}
         {loading && profiles.length === 0 ? (
-          <div className="py-16 text-center text-slate-400 text-sm flex flex-col items-center justify-center space-y-2 bg-white rounded-3xl border border-slate-200">
-            <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
-            <span>Searching academic profiles...</span>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6" aria-busy="true">
+            {[1, 2, 3, 4, 5, 6].map((n) => (
+              <div key={n} className="bg-white rounded-2xl p-6 border border-slate-200 space-y-4 animate-pulse">
+                <div className="flex justify-between items-center">
+                  <div className="h-5 w-20 bg-slate-200 rounded-md" />
+                  <div className="h-4 w-16 bg-slate-200 rounded-md" />
+                </div>
+                <div className="space-y-2">
+                  <div className="h-5 w-3/4 bg-slate-200 rounded-md" />
+                  <div className="h-4 w-1/2 bg-slate-200 rounded-md" />
+                  <div className="h-4 w-1/3 bg-slate-200 rounded-md" />
+                </div>
+                <div className="pt-3 border-t border-slate-100 flex justify-between items-center">
+                  <div className="h-4 w-20 bg-slate-200 rounded-md" />
+                  <div className="h-8 w-24 bg-slate-200 rounded-xl" />
+                </div>
+              </div>
+            ))}
           </div>
-        ) : profiles.length === 0 ? (
+        ) : !loading && profiles.length === 0 ? (
+          /* Empty State */
           <div className="bg-white p-12 rounded-3xl border border-slate-200 text-center space-y-3 shadow-xs">
             <p className="text-slate-700 font-bold text-base">No profiles found.</p>
             <p className="text-slate-500 text-xs max-w-sm mx-auto">
-              No profiles found matching your query. Try changing your search or filters.
+              No academic profiles match your query or filter criteria. Try adjusting your keywords or clearing filters.
             </p>
             {hasActiveFilters && (
               <button
+                type="button"
                 onClick={handleResetFilters}
                 className="px-4 py-2 bg-indigo-600 text-white rounded-full text-xs font-semibold inline-flex items-center space-x-1.5 shadow-xs"
               >
@@ -570,6 +651,7 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
             )}
           </div>
         ) : (
+          /* Results Grid */
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {profiles.map((p) => (
               <div
@@ -582,17 +664,19 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
                       ID: {p.id}
                     </span>
                     <span className="text-[11px] font-semibold text-slate-500">
-                      {p.total_credits || 0} Fixed Credits
+                      {p.total_credits || 0} Total Credits
                     </span>
                   </div>
 
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <h3 className="font-bold text-slate-900 text-lg group-hover:text-indigo-600 transition-colors line-clamp-1">
                       {p.profile_name}
                     </h3>
-                    <div className="text-xs text-slate-600 space-y-0.5 font-medium">
-                      <p className="line-clamp-1"><strong>University:</strong> {p.university}</p>
-                      <p className="line-clamp-1"><strong>Faculty:</strong> {p.faculty}</p>
+                    <div className="text-xs text-slate-600 space-y-1 font-medium">
+                      <p className="line-clamp-1"><strong>University:</strong> {p.university || 'General University'}</p>
+                      {p.faculty && (
+                        <p className="line-clamp-1"><strong>Faculty:</strong> {p.faculty}</p>
+                      )}
                       {p.department && (
                         <p className="line-clamp-1 text-slate-500"><strong>Department:</strong> {p.department}</p>
                       )}
@@ -604,11 +688,14 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
                 </div>
 
                 <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold">
-                  <span className="text-indigo-600">
-                    {p.semester_count || 1} Semester(s)
-                  </span>
+                  <div className="flex items-center space-x-2 text-indigo-600">
+                    <span>{p.semester_count || 1} Semester(s)</span>
+                    <span>•</span>
+                    <span className="text-slate-500">{p.total_subjects || 0} Subjects</span>
+                  </div>
 
                   <button
+                    type="button"
                     onClick={() => onOpenProfile(p.id)}
                     className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shadow-xs transition-transform active:scale-95"
                   >

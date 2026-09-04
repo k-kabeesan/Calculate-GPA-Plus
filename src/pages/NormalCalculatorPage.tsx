@@ -4,6 +4,7 @@ import type { Subject, GradeOption } from '../types';
 import { DEFAULT_GRADING_SCALE, calculateSemesterGPA } from '../utils/gpa';
 import { GradingScaleModal } from '../components/GradingScaleModal';
 import { generateAcademicPDF } from '../utils/pdfGenerator';
+import { GpaInsights } from '../components/GpaInsights';
 
 interface NormalCalculatorPageProps {
   onConvertToProfile?: (subjects: Subject[], scale: GradeOption[]) => void;
@@ -151,11 +152,11 @@ export const NormalCalculatorPage: React.FC<NormalCalculatorPageProps> = ({ onCo
                   </label>
                   <input
                     type="number"
-                    min="0.5"
+                    min="0"
                     step="0.5"
                     max="30"
-                    value={sub.credit || ''}
-                    onChange={(e) => handleUpdateSubject(sub.id!, 'credit', parseFloat(e.target.value) || 0)}
+                    value={sub.credit !== undefined && sub.credit !== null ? sub.credit : ''}
+                    onChange={(e) => handleUpdateSubject(sub.id!, 'credit', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)}
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-sm font-semibold text-slate-900 text-center focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                   />
                 </div>
@@ -181,8 +182,10 @@ export const NormalCalculatorPage: React.FC<NormalCalculatorPageProps> = ({ onCo
                 {/* Remove button */}
                 <div className="sm:pt-5">
                   <button
+                    type="button"
                     onClick={() => handleRemoveSubject(sub.id!)}
                     disabled={subjects.length <= 1}
+                    aria-label={`Delete ${sub.subject_name || 'subject'}`}
                     className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors disabled:opacity-30 disabled:hover:bg-transparent"
                     title="Remove subject"
                   >
@@ -296,6 +299,15 @@ export const NormalCalculatorPage: React.FC<NormalCalculatorPageProps> = ({ onCo
           </div>
         </div>
       </div>
+
+      {/* GPA Insights & Target GPA Calculator */}
+      {result.calculations.length > 0 && (
+        <GpaInsights
+          currentGpa={result.gpa}
+          totalCredits={result.total_credits}
+          calculations={result.calculations}
+        />
+      )}
 
       {/* Modal for editing grade scale */}
       <GradingScaleModal
