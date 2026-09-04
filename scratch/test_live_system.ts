@@ -24,7 +24,8 @@ async function runLiveVerification() {
     const profilesRes = await fetch('http://localhost:5000/api/profiles');
     const profilesData = await profilesRes.json();
     console.log(`✓ Profiles API (http://localhost:5000/api/profiles): Status ${profilesRes.status}`);
-    console.log(`  Returned ${Array.isArray(profilesData) ? profilesData.length : 0} profiles`);
+    const profilesCount = Array.isArray(profilesData) ? profilesData.length : (profilesData.profiles?.length || 0);
+    console.log(`  Returned ${profilesCount} profiles`);
   } catch (err: any) {
     console.error(`✗ Profiles API error: ${err.message}`);
   }
@@ -34,7 +35,8 @@ async function runLiveVerification() {
     const searchRes = await fetch('http://localhost:5000/api/profiles?search=NANO&sort=university_asc');
     const searchData = await searchRes.json();
     console.log(`✓ Module Code Search & Sort (search=NANO&sort=university_asc): Status ${searchRes.status}`);
-    console.log(`  Returned ${Array.isArray(searchData) ? searchData.length : 0} profiles`);
+    const searchCount = Array.isArray(searchData) ? searchData.length : (searchData.profiles?.length || 0);
+    console.log(`  Returned ${searchCount} profiles`);
   } catch (err: any) {
     console.error(`✗ Search API error: ${err.message}`);
   }

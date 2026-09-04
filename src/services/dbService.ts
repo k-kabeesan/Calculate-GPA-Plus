@@ -8,6 +8,9 @@ const supabaseUrl = env.VITE_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || env.VITE_SUPABASE_PUBLISHABLE_KEY || env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+export const apiBase = (env.VITE_API_URL || '').replace(/\/+$/, '');
+
+let supabaseFailed = false;
 
 let supabase: SupabaseClient | null = null;
 if (isSupabaseConfigured) {
@@ -47,6 +50,54 @@ export async function withTimeout<T>(promise: Promise<T>, ms = 5000, fallbackErr
   return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
 }
 
+// Safe JSON fetch wrapper that guards against HTML error pages and invalid responses
+export async function safeFetchJson<T = any>(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  fallbackErrMsg = 'Unable to complete request'
+): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(input, init);
+  } catch (netErr: any) {
+    throw new Error(`Network error: ${netErr?.message || 'Unable to connect to the server'}`);
+  }
+
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+
+  let text = '';
+  try {
+    text = await res.text();
+  } catch {
+    throw new Error('Unable to read server response.');
+  }
+
+  // Detect HTML response (which happens when SPA / Vercel rewrites API calls to index.html)
+  const isHtml = contentType.includes('text/html') || /^\s*<!doctype\s+html/i.test(text) || /<html[\s>]/i.test(text);
+
+  if (isHtml) {
+    throw new Error(
+      `API endpoint misconfigured: Server returned HTML instead of JSON. The backend route was not reached or was rewritten to index.html.`
+    );
+  }
+
+  let data: any;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error('Invalid JSON response received from server.');
+  }
+
+  if (!res.ok) {
+    const errorMsg = (data && typeof data === 'object' && (data.error || data.message))
+      ? (data.error || data.message)
+      : (fallbackErrMsg || `Request failed with status ${res.status}`);
+    throw new Error(errorMsg);
+  }
+
+  return data as T;
+}
+
 // Clean extracted subject names automatically
 export function cleanSubjectTitle(rawTitle: string): string {
   if (!rawTitle) return '';
@@ -83,14 +134,14 @@ export async function fetchFilterOptions(): Promise<{
   degrees: string[];
   academicYears: string[];
 }> {
-  if (isSupabaseConfigured && supabase) {
+  if (isSupabaseConfigured && supabase && !supabaseFailed) {
     try {
       const res: any = await withTimeout(
         supabase
           .from('profiles')
           .select('university, faculty, department, academic_year')
           .eq('visibility', 'public') as any,
-        5000
+        3000
       );
       const data: any[] = res?.data || [];
 
@@ -105,14 +156,13 @@ export async function fetchFilterOptions(): Promise<{
 
       return { universities, faculties, departments, degrees: [], academicYears };
     } catch {
-      // Fallback to Express backend
+      supabaseFailed = true;
+      // Fallback to backend API
     }
   }
 
   try {
-    const res = await fetch('/api/profiles/filters');
-    if (!res.ok) return { universities: [], faculties: [], departments: [], degrees: [], academicYears: [] };
-    const data = await res.json();
+    const data = await safeFetchJson<any>(`${apiBase}/api/profiles/filters`);
     return {
       universities: data.universities || [],
       faculties: data.faculties || [],
@@ -130,7 +180,7 @@ export async function fetchPublicProfiles(paramsOrQuery: string | ProfileFilterP
     ? { search: paramsOrQuery }
     : paramsOrQuery;
 
-  if (isSupabaseConfigured && supabase) {
+  if (isSupabaseConfigured && supabase && !supabaseFailed) {
     try {
       let query = supabase
         .from('profiles')
@@ -163,7 +213,7 @@ export async function fetchPublicProfiles(paramsOrQuery: string | ProfileFilterP
       if (filters.department) query = query.eq('department', filters.department);
       if (filters.academicYear) query = query.eq('academic_year', filters.academicYear);
 
-      const queryRes: any = await withTimeout(query as any, 5000);
+      const queryRes: any = await withTimeout(query as any, 3000);
       let data: any = queryRes?.data;
       let error: any = queryRes?.error;
       if (error && (error.message.includes('department') || error.message.includes('schema cache'))) {
@@ -197,7 +247,7 @@ export async function fetchPublicProfiles(paramsOrQuery: string | ProfileFilterP
         if (filters.faculty) fallbackQuery = fallbackQuery.eq('faculty', filters.faculty);
         if (filters.academicYear) fallbackQuery = fallbackQuery.eq('academic_year', filters.academicYear);
 
-        const fbRes: any = await withTimeout(fallbackQuery as any, 5000);
+        const fbRes: any = await withTimeout(fallbackQuery as any, 3000);
         data = (fbRes?.data || []).map((p: any) => ({ ...p, department: '', degree: '' }));
         error = fbRes?.error;
       }
@@ -263,7 +313,8 @@ export async function fetchPublicProfiles(paramsOrQuery: string | ProfileFilterP
         return results;
       }
     } catch {
-      // Supabase failed or timed out, seamlessly fallback to SQLite Express API
+      supabaseFailed = true;
+      // Supabase failed or timed out, seamlessly fallback to backend API
     }
   }
 
@@ -278,100 +329,113 @@ export async function fetchPublicProfiles(paramsOrQuery: string | ProfileFilterP
   if (filters.sort) searchParams.set('sort', filters.sort);
 
   const queryString = searchParams.toString();
-  const url = queryString ? `/api/profiles?${queryString}` : '/api/profiles';
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('Failed to fetch profiles. Please try again.');
-  return res.json();
+  const url = queryString ? `${apiBase}/api/profiles?${queryString}` : `${apiBase}/api/profiles`;
+  
+  const data = await safeFetchJson<any>(url, undefined, 'Failed to fetch profiles. Please try again.');
+  if (data && Array.isArray(data.profiles)) {
+    return data.profiles;
+  }
+  if (Array.isArray(data)) {
+    return data;
+  }
+  return [];
 }
 
 export async function fetchProfileById(profileId: string): Promise<Profile> {
   const cleanId = profileId.trim().toUpperCase();
 
-  if (isSupabaseConfigured && supabase) {
-    // 1. Get profile row
-    let { data: profile, error: pErr } = await supabase
-      .from('profiles')
-      .select('id, profile_name, university, faculty, department, academic_year, description, visibility, created_at, updated_at, passcode_hash')
-      .eq('id', cleanId)
-      .single();
-
-    if (pErr && (pErr.message.includes('department') || pErr.message.includes('schema cache'))) {
-      const fb = await supabase
+  if (isSupabaseConfigured && supabase && !supabaseFailed) {
+    try {
+      // 1. Get profile row
+      let { data: profile, error: pErr } = await supabase
         .from('profiles')
-        .select('id, profile_name, university, faculty, academic_year, description, visibility, created_at, updated_at, passcode_hash')
+        .select('id, profile_name, university, faculty, department, academic_year, description, visibility, created_at, updated_at, passcode_hash')
         .eq('id', cleanId)
         .single();
-      profile = fb.data ? { ...fb.data, department: '' } : null;
-      pErr = fb.error;
+
+      if (pErr && (pErr.message.includes('department') || pErr.message.includes('schema cache'))) {
+        const fb = await supabase
+          .from('profiles')
+          .select('id, profile_name, university, faculty, academic_year, description, visibility, created_at, updated_at, passcode_hash')
+          .eq('id', cleanId)
+          .single();
+        profile = fb.data ? { ...fb.data, department: '' } : null;
+        pErr = fb.error;
+      }
+
+      if (pErr || !profile) {
+        throw new Error('Profile not found. Please check the Profile ID or URL link.');
+      }
+
+      // 2. Get semesters & subjects
+      const { data: semesters, error: sErr } = await supabase
+        .from('semesters')
+        .select('id, semester_name, semester_order')
+        .eq('profile_id', cleanId)
+        .order('semester_order', { ascending: true });
+
+      if (sErr) throw new Error(sErr.message);
+
+      const formattedSemesters: Semester[] = [];
+      for (const sem of semesters || []) {
+        const { data: subjects, error: subErr } = await supabase
+          .from('subjects')
+          .select('id, subject_code, subject_name, credit')
+          .eq('semester_id', sem.id)
+          .order('id', { ascending: true });
+
+        if (subErr) throw new Error(subErr.message);
+
+        formattedSemesters.push({
+          id: sem.id,
+          semester_name: sem.semester_name,
+          semester_order: sem.semester_order,
+          subjects: (subjects || []).map((sub: any) => ({
+            id: sub.id,
+            subject_code: sub.subject_code || '',
+            subject_name: sub.subject_name,
+            credit: Number(sub.credit)
+          }))
+        });
+      }
+
+      // 3. Get grading scale
+      const { data: scales } = await supabase
+        .from('grading_scales')
+        .select('grade, grade_point')
+        .eq('profile_id', cleanId)
+        .order('grade_point', { ascending: false });
+
+      const gradingScale: GradeOption[] = (scales && scales.length > 0)
+        ? scales.map((s: any) => ({ grade: s.grade, grade_point: Number(s.grade_point) }))
+        : DEFAULT_GRADING_SCALE;
+
+      return {
+        id: profile.id,
+        profile_name: profile.profile_name,
+        university: profile.university,
+        faculty: profile.faculty,
+        department: profile.department || '',
+        academic_year: profile.academic_year || '',
+        description: profile.description || '',
+        visibility: profile.visibility as any,
+        has_passcode: Boolean(profile.passcode_hash && profile.passcode_hash.length > 0),
+        created_at: profile.created_at,
+        updated_at: profile.updated_at,
+        semesters: formattedSemesters,
+        gradingScale
+      };
+    } catch {
+      supabaseFailed = true;
+      // Fall through to API
     }
-
-    if (pErr || !profile) {
-      throw new Error('Profile not found. Please check the Profile ID or URL link.');
-    }
-
-    // 2. Get semesters & subjects
-    const { data: semesters, error: sErr } = await supabase
-      .from('semesters')
-      .select('id, semester_name, semester_order')
-      .eq('profile_id', cleanId)
-      .order('semester_order', { ascending: true });
-
-    if (sErr) throw new Error(sErr.message);
-
-    const formattedSemesters: Semester[] = [];
-    for (const sem of semesters || []) {
-      const { data: subjects, error: subErr } = await supabase
-        .from('subjects')
-        .select('id, subject_code, subject_name, credit')
-        .eq('semester_id', sem.id)
-        .order('id', { ascending: true });
-
-      if (subErr) throw new Error(subErr.message);
-
-      formattedSemesters.push({
-        id: sem.id,
-        semester_name: sem.semester_name,
-        semester_order: sem.semester_order,
-        subjects: (subjects || []).map((sub: any) => ({
-          id: sub.id,
-          subject_code: sub.subject_code || '',
-          subject_name: sub.subject_name,
-          credit: Number(sub.credit)
-        }))
-      });
-    }
-
-    // 3. Get grading scale
-    const { data: scales } = await supabase
-      .from('grading_scales')
-      .select('grade, grade_point')
-      .eq('profile_id', cleanId)
-      .order('grade_point', { ascending: false });
-
-    const gradingScale: GradeOption[] = (scales && scales.length > 0)
-      ? scales.map((s: any) => ({ grade: s.grade, grade_point: Number(s.grade_point) }))
-      : DEFAULT_GRADING_SCALE;
-
-    return {
-      id: profile.id,
-      profile_name: profile.profile_name,
-      university: profile.university,
-      faculty: profile.faculty,
-      department: profile.department || '',
-      academic_year: profile.academic_year || '',
-      description: profile.description || '',
-      visibility: profile.visibility as any,
-      has_passcode: Boolean(profile.passcode_hash && profile.passcode_hash.length > 0),
-      created_at: profile.created_at,
-      updated_at: profile.updated_at,
-      semesters: formattedSemesters,
-      gradingScale
-    };
-  } else {
-    const res = await fetch(`/api/profiles/${cleanId}`);
-    if (!res.ok) throw new Error('Profile not found. Please check the Profile ID or link.');
-    return res.json();
   }
+
+  const data = await safeFetchJson<any>(`${apiBase}/api/profiles/${cleanId}`, undefined, 'Profile not found. Please check the Profile ID or link.');
+  if (data && data.profile) {
+    return data.profile;
+  }
+  return data;
 }
 
 export async function createProfile(profileData: {
@@ -387,30 +451,31 @@ export async function createProfile(profileData: {
   semesters: Semester[];
   gradingScale?: GradeOption[];
 }): Promise<{ id: string }> {
-  if (isSupabaseConfigured && supabase) {
-    const profileId = generateProfileId();
-    const passcodeHash = profileData.passcode ? await hashPasscode(profileData.passcode) : '';
+  if (isSupabaseConfigured && supabase && !supabaseFailed) {
+    try {
+      const profileId = generateProfileId();
+      const passcodeHash = profileData.passcode ? await hashPasscode(profileData.passcode) : '';
 
-    // Insert profile
-    let { error: pErr } = await supabase
-      .from('profiles')
-      .insert({
-        id: profileId,
-        profile_name: profileData.profile_name.trim(),
-        university: (profileData.university || '').trim(),
-        faculty: (profileData.faculty || '').trim(),
-        department: (profileData.department || '').trim(),
-        degree: (profileData.degree || '').trim(),
-        academic_year: (profileData.academic_year || '').trim(),
-        description: (profileData.description || '').trim(),
-        visibility: profileData.visibility || 'public',
-        passcode_hash: passcodeHash
-      });
-
-    if (pErr && (pErr.message.includes('department') || pErr.message.includes('schema cache'))) {
-      const fb = await supabase
+      // Insert profile
+      let { error: pErr } = await supabase
         .from('profiles')
         .insert({
+          id: profileId,
+          profile_name: profileData.profile_name.trim(),
+          university: (profileData.university || '').trim(),
+          faculty: (profileData.faculty || '').trim(),
+          department: (profileData.department || '').trim(),
+          degree: (profileData.degree || '').trim(),
+          academic_year: (profileData.academic_year || '').trim(),
+          description: (profileData.description || '').trim(),
+          visibility: profileData.visibility || 'public',
+          passcode_hash: passcodeHash
+        });
+
+      if (pErr && (pErr.message.includes('department') || pErr.message.includes('schema cache'))) {
+        const fb = await supabase
+          .from('profiles')
+          .insert({
           id: profileId,
           profile_name: profileData.profile_name.trim(),
           university: (profileData.university || '').trim(),
@@ -421,98 +486,110 @@ export async function createProfile(profileData: {
           visibility: profileData.visibility || 'public',
           passcode_hash: passcodeHash
         });
-      pErr = fb.error;
-    }
-
-    if (pErr) throw new Error(pErr.message);
-
-    // Insert semesters & subjects
-    let semOrder = 1;
-    for (const sem of profileData.semesters) {
-      const { data: semRow, error: semErr } = await supabase
-        .from('semesters')
-        .insert({
-          profile_id: profileId,
-          semester_name: sem.semester_name || `Semester ${semOrder}`,
-          semester_order: semOrder
-        })
-        .select('id')
-        .single();
-
-      if (semErr) throw new Error(semErr.message);
-
-      if (sem.subjects && Array.isArray(sem.subjects)) {
-        const subjectRows = sem.subjects
-          .filter(sub => sub.subject_name)
-          .map(sub => ({
-            semester_id: semRow.id,
-            subject_code: (sub.subject_code || '').trim(),
-            subject_name: (sub.subject_name || '').trim(),
-            credit: Number(sub.credit) || 0
-          }));
-
-        if (subjectRows.length > 0) {
-          const { error: subErr } = await supabase
-            .from('subjects')
-            .insert(subjectRows);
-          if (subErr) throw new Error(subErr.message);
-        }
+        pErr = fb.error;
       }
-      semOrder++;
+
+      if (pErr) throw new Error(pErr.message);
+
+      // Insert semesters & subjects
+      let semOrder = 1;
+      for (const sem of profileData.semesters) {
+        const { data: semRow, error: semErr } = await supabase
+          .from('semesters')
+          .insert({
+            profile_id: profileId,
+            semester_name: sem.semester_name || `Semester ${semOrder}`,
+            semester_order: semOrder
+          })
+          .select('id')
+          .single();
+
+        if (semErr) throw new Error(semErr.message);
+
+        if (sem.subjects && Array.isArray(sem.subjects)) {
+          const subjectRows = sem.subjects
+            .filter(sub => sub.subject_name)
+            .map(sub => ({
+              semester_id: semRow.id,
+              subject_code: (sub.subject_code || '').trim(),
+              subject_name: (sub.subject_name || '').trim(),
+              credit: Number(sub.credit || 0)
+            }));
+
+          if (subjectRows.length > 0) {
+            const { error: subInsertErr } = await supabase.from('subjects').insert(subjectRows);
+            if (subInsertErr) throw new Error(subInsertErr.message);
+          }
+        }
+        semOrder++;
+      }
+
+      // Insert grading scale
+      const scaleToInsert = (profileData.gradingScale && profileData.gradingScale.length > 0)
+        ? profileData.gradingScale
+        : DEFAULT_GRADING_SCALE;
+
+      const scaleRows = scaleToInsert.map(gs => ({
+        profile_id: profileId,
+        grade: gs.grade.trim(),
+        grade_point: Number(gs.grade_point)
+      }));
+
+      const { error: scaleErr } = await supabase.from('grading_scales').insert(scaleRows);
+      if (scaleErr) throw new Error(scaleErr.message);
+
+      return { id: profileId };
+    } catch {
+      supabaseFailed = true;
+      // Fall through to backend API
     }
+  }
 
-    // Insert grading scale
-    const scaleToInsert = (profileData.gradingScale && profileData.gradingScale.length > 0)
-      ? profileData.gradingScale
-      : DEFAULT_GRADING_SCALE;
-
-    const scaleRows = scaleToInsert.map(gs => ({
-      profile_id: profileId,
-      grade: gs.grade.trim(),
-      grade_point: Number(gs.grade_point)
-    }));
-
-    const { error: scaleErr } = await supabase.from('grading_scales').insert(scaleRows);
-    if (scaleErr) throw new Error(scaleErr.message);
-
-    return { id: profileId };
-  } else {
-    const res = await fetch('/api/profiles', {
+  const data = await safeFetchJson<{ success?: boolean; id: string; error?: string }>(
+    `${apiBase}/api/profiles`,
+    {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(profileData)
-    });
+    },
+    'Failed to create profile.'
+  );
 
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Failed to create profile.');
-    return { id: data.id };
-  }
+  return { id: data.id };
 }
 
 export async function verifyOwnerPasscode(profileId: string, passcode: string): Promise<boolean> {
   const cleanId = profileId.trim().toUpperCase();
 
-  if (isSupabaseConfigured && supabase) {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('passcode_hash')
-      .eq('id', cleanId)
-      .single();
+  if (isSupabaseConfigured && supabase && !supabaseFailed) {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('passcode_hash')
+        .eq('id', cleanId)
+        .single();
 
-    if (error || !data) throw new Error('Profile not found');
-    if (!data.passcode_hash) return true; // No passcode required
+      if (error || !data) throw new Error('Profile not found');
+      if (!data.passcode_hash) return true; // No passcode required
 
-    const inputHash = await hashPasscode(passcode || '');
-    return inputHash === data.passcode_hash;
-  } else {
-    const res = await fetch(`/api/profiles/${cleanId}/verify-passcode`, {
+      const inputHash = await hashPasscode(passcode || '');
+      return inputHash === data.passcode_hash;
+    } catch {
+      supabaseFailed = true;
+      // Fall through to backend API
+    }
+  }
+
+  const data = await safeFetchJson<{ success?: boolean; valid: boolean; error?: string }>(
+    `${apiBase}/api/profiles/${cleanId}/verify-passcode`,
+    {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ passcode })
-    });
-    const data = await res.json();
-    return Boolean(data.valid);
-  }
+    }
+  );
+
+  return Boolean(data.valid);
 }
 
 export async function updateProfile(
@@ -533,34 +610,20 @@ export async function updateProfile(
 ): Promise<boolean> {
   const cleanId = profileId.trim().toUpperCase();
 
-  if (isSupabaseConfigured && supabase) {
-    // Verify passcode first
-    const isValid = await verifyOwnerPasscode(cleanId, passcode);
-    if (!isValid) throw new Error('Unauthorized. Invalid owner passcode.');
+  if (isSupabaseConfigured && supabase && !supabaseFailed) {
+    try {
+      // Verify passcode first
+      const isValid = await verifyOwnerPasscode(cleanId, passcode);
+      if (!isValid) throw new Error('Unauthorized. Invalid owner passcode.');
 
-    // Update profile row
-    let { error: pErr } = await supabase
-      .from('profiles')
-      .update({
-        profile_name: updateData.profile_name.trim(),
-        university: updateData.university.trim(),
-        faculty: updateData.faculty.trim(),
-        department: (updateData.department || '').trim(),
-        degree: (updateData.degree || '').trim(),
-        academic_year: (updateData.academic_year || '').trim(),
-        description: (updateData.description || '').trim(),
-        visibility: updateData.visibility || 'public',
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', cleanId);
-
-    if (pErr && (pErr.message.includes('department') || pErr.message.includes('schema cache'))) {
-      const fb = await supabase
+      // Update profile row
+      let { error: pErr } = await supabase
         .from('profiles')
         .update({
           profile_name: updateData.profile_name.trim(),
           university: updateData.university.trim(),
           faculty: updateData.faculty.trim(),
+          department: (updateData.department || '').trim(),
           degree: (updateData.degree || '').trim(),
           academic_year: (updateData.academic_year || '').trim(),
           description: (updateData.description || '').trim(),
@@ -568,97 +631,123 @@ export async function updateProfile(
           updated_at: new Date().toISOString()
         })
         .eq('id', cleanId);
-      pErr = fb.error;
-    }
 
-    if (pErr) throw new Error(pErr.message);
-
-    // Delete old semesters and scales
-    await supabase.from('semesters').delete().eq('profile_id', cleanId);
-    await supabase.from('grading_scales').delete().eq('profile_id', cleanId);
-
-    // Re-insert semesters & subjects
-    let semOrder = 1;
-    for (const sem of updateData.semesters) {
-      const { data: semRow, error: semErr } = await supabase
-        .from('semesters')
-        .insert({
-          profile_id: cleanId,
-          semester_name: sem.semester_name || `Semester ${semOrder}`,
-          semester_order: semOrder
-        })
-        .select('id')
-        .single();
-
-      if (semErr) throw new Error(semErr.message);
-
-      if (sem.subjects && Array.isArray(sem.subjects)) {
-        const subjectRows = sem.subjects
-          .filter(sub => sub.subject_name && Number(sub.credit) >= 0)
-          .map(sub => ({
-            semester_id: semRow.id,
-            subject_code: sub.subject_code || '',
-            subject_name: sub.subject_name.trim(),
-            credit: Number(sub.credit)
-          }));
-
-        if (subjectRows.length > 0) {
-          await supabase.from('subjects').insert(subjectRows);
-        }
+      if (pErr && (pErr.message.includes('department') || pErr.message.includes('schema cache'))) {
+        const fb = await supabase
+          .from('profiles')
+          .update({
+            profile_name: updateData.profile_name.trim(),
+            university: updateData.university.trim(),
+            faculty: updateData.faculty.trim(),
+            degree: (updateData.degree || '').trim(),
+            academic_year: (updateData.academic_year || '').trim(),
+            description: (updateData.description || '').trim(),
+            visibility: updateData.visibility || 'public',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', cleanId);
+        pErr = fb.error;
       }
-      semOrder++;
+
+      if (pErr) throw new Error(pErr.message);
+
+      // Delete old semesters and scales
+      await supabase.from('semesters').delete().eq('profile_id', cleanId);
+      await supabase.from('grading_scales').delete().eq('profile_id', cleanId);
+
+      // Re-insert semesters & subjects
+      let semOrder = 1;
+      for (const sem of updateData.semesters) {
+        const { data: semRow, error: semErr } = await supabase
+          .from('semesters')
+          .insert({
+            profile_id: cleanId,
+            semester_name: sem.semester_name || `Semester ${semOrder}`,
+            semester_order: semOrder
+          })
+          .select('id')
+          .single();
+
+        if (semErr) throw new Error(semErr.message);
+
+        if (sem.subjects && Array.isArray(sem.subjects)) {
+          const subjectRows = sem.subjects
+            .filter(sub => sub.subject_name && Number(sub.credit) >= 0)
+            .map(sub => ({
+              semester_id: semRow.id,
+              subject_code: sub.subject_code || '',
+              subject_name: sub.subject_name.trim(),
+              credit: Number(sub.credit)
+            }));
+
+          if (subjectRows.length > 0) {
+            await supabase.from('subjects').insert(subjectRows);
+          }
+        }
+        semOrder++;
+      }
+
+      // Re-insert scales
+      const scaleToInsert = (updateData.gradingScale && updateData.gradingScale.length > 0)
+        ? updateData.gradingScale
+        : DEFAULT_GRADING_SCALE;
+
+      const scaleRows = scaleToInsert.map(gs => ({
+        profile_id: cleanId,
+        grade: gs.grade.trim(),
+        grade_point: Number(gs.grade_point)
+      }));
+
+      await supabase.from('grading_scales').insert(scaleRows);
+
+      return true;
+    } catch {
+      supabaseFailed = true;
+      // Fall through to backend API
     }
+  }
 
-    // Re-insert scales
-    const scaleToInsert = (updateData.gradingScale && updateData.gradingScale.length > 0)
-      ? updateData.gradingScale
-      : DEFAULT_GRADING_SCALE;
-
-    const scaleRows = scaleToInsert.map(gs => ({
-      profile_id: cleanId,
-      grade: gs.grade.trim(),
-      grade_point: Number(gs.grade_point)
-    }));
-
-    await supabase.from('grading_scales').insert(scaleRows);
-
-    return true;
-  } else {
-    const res = await fetch(`/api/profiles/${cleanId}`, {
+  await safeFetchJson(
+    `${apiBase}/api/profiles/${cleanId}`,
+    {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ passcode, ...updateData })
-    });
-    if (!res.ok) {
-      const data = await res.json();
-      throw new Error(data.error || 'Failed to update profile.');
-    }
-    return true;
-  }
+    },
+    'Failed to update profile.'
+  );
+
+  return true;
 }
 
 export async function deleteProfile(profileId: string, passcode: string): Promise<boolean> {
   const cleanId = profileId.trim().toUpperCase();
 
-  if (isSupabaseConfigured && supabase) {
-    const isValid = await verifyOwnerPasscode(cleanId, passcode);
-    if (!isValid) throw new Error('Unauthorized. Invalid owner passcode.');
+  if (isSupabaseConfigured && supabase && !supabaseFailed) {
+    try {
+      const isValid = await verifyOwnerPasscode(cleanId, passcode);
+      if (!isValid) throw new Error('Unauthorized. Invalid owner passcode.');
 
-    const { error } = await supabase.from('profiles').delete().eq('id', cleanId);
-    if (error) throw new Error(error.message);
-    return true;
-  } else {
-    const res = await fetch(`/api/profiles/${cleanId}`, {
+      const { error } = await supabase.from('profiles').delete().eq('id', cleanId);
+      if (error) throw new Error(error.message);
+      return true;
+    } catch {
+      supabaseFailed = true;
+      // Fall through to backend API
+    }
+  }
+
+  await safeFetchJson(
+    `${apiBase}/api/profiles/${cleanId}`,
+    {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ passcode })
-    });
-    if (!res.ok) {
-      const data = await res.json();
-      throw new Error(data.error || 'Failed to delete profile.');
-    }
-    return true;
-  }
+    },
+    'Failed to delete profile.'
+  );
+
+  return true;
 }
 
 export function extractProfileFallbackClient(inputText: string): any {
@@ -933,7 +1022,7 @@ export async function extractAiProfile(text: string): Promise<any> {
   }
 
   try {
-    const res = await fetch('/api/ai/extract-profile', {
+    const res = await fetch(`${apiBase}/api/ai/extract-profile`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text })
@@ -986,7 +1075,7 @@ export async function extractAiProfileFromImage(
 
     onProgress?.(20);
 
-    const res = await fetch('/api/ai/extract-profile', {
+    const res = await fetch(`${apiBase}/api/ai/extract-profile`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ image: base64Data })
