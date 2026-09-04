@@ -56,10 +56,33 @@ export async function safeFetchJson<T = any>(
   init?: RequestInit,
   fallbackErrMsg = 'Unable to complete request'
 ): Promise<T> {
+  const mergedInit: RequestInit = {
+    ...init,
+    headers: {
+      'Accept': 'application/json',
+      ...(init?.headers || {})
+    }
+  };
+
   let res: Response;
   try {
-    res = await fetch(input, init);
+    res = await fetch(input, mergedInit);
   } catch (netErr: any) {
+    // If running in browser and a relative /api endpoint failed on localhost, attempt direct connection to port 5000:
+    if (typeof window !== 'undefined' && typeof input === 'string' && input.startsWith('/api')) {
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      if (isLocalhost && window.location.port !== '5000') {
+        try {
+          const directRes = await fetch(`http://127.0.0.1:5000${input}`, mergedInit);
+          if (directRes.ok) {
+            const directText = await directRes.text();
+            if (!directText.trim().startsWith('<')) {
+              return JSON.parse(directText) as T;
+            }
+          }
+        } catch {}
+      }
+    }
     throw new Error(`Network error: ${netErr?.message || 'Unable to connect to the server'}`);
   }
 
@@ -76,6 +99,23 @@ export async function safeFetchJson<T = any>(
   const isHtml = contentType.includes('text/html') || /^\s*<!doctype\s+html/i.test(text) || /<html[\s>]/i.test(text);
 
   if (isHtml) {
+    // If on localhost in a browser and Vite proxied to index.html, try direct to Express backend port 5000:
+    if (typeof window !== 'undefined' && typeof input === 'string' && input.startsWith('/api')) {
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      if (isLocalhost && window.location.port !== '5000') {
+        try {
+          const directRes = await fetch(`http://127.0.0.1:5000${input}`, mergedInit);
+          const directText = await directRes.text();
+          const directContentType = (directRes.headers.get('content-type') || '').toLowerCase();
+          const directIsHtml = directContentType.includes('text/html') || /^\s*<!doctype\s+html/i.test(directText) || /<html[\s>]/i.test(directText);
+          if (!directIsHtml) {
+            const data = directText ? JSON.parse(directText) : {};
+            if (directRes.ok) return data as T;
+          }
+        } catch {}
+      }
+    }
+
     throw new Error(
       `API endpoint misconfigured: Server returned HTML instead of JSON. The backend route was not reached or was rewritten to index.html.`
     );

@@ -1,6 +1,8 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
+import path from 'path';
+import fs from 'fs';
 import db from './db';
 
 const app = express();
@@ -10,8 +12,15 @@ app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ limit: '25mb', extended: true }));
 
 // Force JSON Content-Type header on all API routes
-app.use('/api', (req: Request, res: Response, next: NextFunction) => {
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (
+    req.path.startsWith('/api') ||
+    req.path.startsWith('/profiles') ||
+    req.path.startsWith('/health') ||
+    req.path.startsWith('/ai')
+  ) {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  }
   next();
 });
 
@@ -300,7 +309,7 @@ function normalizeAiProfileOutput(raw: any) {
 // -------------------------------------------------------------
 
 // GET /api/health - Diagnostic endpoint to confirm API is live and responding with JSON
-app.get('/api/health', (req: Request, res: Response) => {
+app.get(['/api/health', '/health'], (req: Request, res: Response) => {
   res.json({
     success: true,
     status: 'healthy',
@@ -309,7 +318,7 @@ app.get('/api/health', (req: Request, res: Response) => {
 });
 
 // GET /api/profiles/filters - Return available filter options from database
-app.get('/api/profiles/filters', (req: Request, res: Response) => {
+app.get(['/api/profiles/filters', '/profiles/filters'], (req: Request, res: Response) => {
   try {
     const universities = db.prepare("SELECT DISTINCT university FROM profiles WHERE visibility = 'public' AND university != '' ORDER BY university ASC").all().map((r: any) => r.university);
     const faculties = db.prepare("SELECT DISTINCT faculty FROM profiles WHERE visibility = 'public' AND faculty != '' ORDER BY faculty ASC").all().map((r: any) => r.faculty);
@@ -330,7 +339,7 @@ app.get('/api/profiles/filters', (req: Request, res: Response) => {
 });
 
 // GET /api/profiles - List public profiles with multi-filtering and sorting
-app.get('/api/profiles', (req: Request, res: Response) => {
+app.get(['/api/profiles', '/profiles'], (req: Request, res: Response) => {
   try {
     const {
       search = '',
@@ -421,7 +430,7 @@ app.get('/api/profiles', (req: Request, res: Response) => {
 });
 
 // GET /api/profiles/:id - Fetch single profile with all details
-app.get('/api/profiles/:id', (req: Request, res: Response) => {
+app.get(['/api/profiles/:id', '/profiles/:id'], (req: Request, res: Response) => {
   try {
     const profileId = (req.params.id as string).toUpperCase();
     const profile = db.prepare(`
@@ -471,7 +480,7 @@ app.get('/api/profiles/:id', (req: Request, res: Response) => {
 });
 
 // POST /api/profiles - Create a new profile
-app.post('/api/profiles', (req: Request, res: Response) => {
+app.post(['/api/profiles', '/profiles'], (req: Request, res: Response) => {
   try {
     const {
       profile_name,
@@ -563,7 +572,7 @@ app.post('/api/profiles', (req: Request, res: Response) => {
 });
 
 // POST /api/profiles/:id/verify-passcode
-app.post('/api/profiles/:id/verify-passcode', (req: Request, res: Response) => {
+app.post(['/api/profiles/:id/verify-passcode', '/profiles/:id/verify-passcode'], (req: Request, res: Response) => {
   try {
     const profileId = (req.params.id as string).toUpperCase();
     const { passcode } = req.body;
@@ -590,7 +599,7 @@ app.post('/api/profiles/:id/verify-passcode', (req: Request, res: Response) => {
 });
 
 // PUT /api/profiles/:id - Update profile
-app.put('/api/profiles/:id', (req: Request, res: Response) => {
+app.put(['/api/profiles/:id', '/profiles/:id'], (req: Request, res: Response) => {
   try {
     const profileId = (req.params.id as string).toUpperCase();
     const {
@@ -685,7 +694,7 @@ app.put('/api/profiles/:id', (req: Request, res: Response) => {
 });
 
 // DELETE /api/profiles/:id - Delete profile
-app.delete('/api/profiles/:id', (req: Request, res: Response) => {
+app.delete(['/api/profiles/:id', '/profiles/:id'], (req: Request, res: Response) => {
   try {
     const profileId = (req.params.id as string).toUpperCase();
     const { passcode } = req.body || {};
@@ -710,7 +719,7 @@ app.delete('/api/profiles/:id', (req: Request, res: Response) => {
 });
 
 // POST /api/ai/extract-profile - Vision AI extraction endpoint
-app.post('/api/ai/extract-profile', async (req: Request, res: Response) => {
+app.post(['/api/ai/extract-profile', '/ai/extract-profile'], async (req: Request, res: Response) => {
   try {
     const { text, image } = req.body || {};
     if ((!text || typeof text !== 'string' || !text.trim()) && !image) {
@@ -839,12 +848,29 @@ STRICT MANDATORY RULES:
   }
 });
 
-// Fallback for undefined /api routes: ALWAYS return JSON 404, never HTML!
-app.use('/api', (req: Request, res: Response) => {
-  res.status(404).json({
-    success: false,
-    error: `API endpoint ${req.method} ${req.originalUrl} not found.`
-  });
+// Fallback for undefined API routes: ALWAYS return JSON 404, never HTML!
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (
+    req.path.startsWith('/api') ||
+    req.path.startsWith('/profiles') ||
+    req.path.startsWith('/health') ||
+    req.path.startsWith('/ai')
+  ) {
+    return res.status(404).json({
+      success: false,
+      error: `API endpoint ${req.method} ${req.originalUrl} not found.`
+    });
+  }
+  next();
 });
+
+// Serve static frontend bundle if dist folder exists
+const distPath = path.join(process.cwd(), 'dist');
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  app.use((req: Request, res: Response) => {
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
 
 export default app;
