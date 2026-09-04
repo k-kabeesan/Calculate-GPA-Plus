@@ -18,13 +18,16 @@ export interface DbInterface {
 let dbInstance: DbInterface;
 
 try {
-  // Attempt to use better-sqlite3
+  // In serverless environments (like AWS Lambda / Vercel), native compilation cannot run; use pure JS adapter
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    throw new Error('Serverless environment: Using in-memory adapter');
+  }
+
+  // Attempt to use better-sqlite3 for local Node environment
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const Database = require('better-sqlite3');
   
-  // In serverless environments (like AWS Lambda / Vercel), /tmp is the only writable directory
-  const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-  const baseDir = isServerless ? '/tmp' : process.cwd();
+  const baseDir = process.cwd();
   const dbPath = path.join(baseDir, 'gpa_calculator.db');
 
   const nativeDb = new Database(dbPath);

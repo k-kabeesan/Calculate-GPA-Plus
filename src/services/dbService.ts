@@ -1,21 +1,12 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import type { Profile, GradeOption, Semester } from '../types';
 import { DEFAULT_GRADING_SCALE } from '../utils/gpa';
 
 const globalProcess = (typeof globalThis !== 'undefined' && (globalThis as any).process) ? (globalThis as any).process.env : {};
 const env = (typeof import.meta !== 'undefined' && (import.meta as any).env) ? (import.meta as any).env : globalProcess;
-const supabaseUrl = env.VITE_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || env.VITE_SUPABASE_PUBLISHABLE_KEY || env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+// Dynamic API Base URL: in Vercel production, relative '/api' is used; for external backends VITE_API_URL can be provided.
 export const apiBase = (env.VITE_API_URL || '').replace(/\/+$/, '');
-
-let supabaseFailed = false;
-
-let supabase: SupabaseClient | null = null;
-if (isSupabaseConfigured) {
-  supabase = createClient(supabaseUrl, supabaseAnonKey);
-}
+export const isSupabaseConfigured = true;
 
 // Generate readable 6-character profile ID (e.g., ABC123, WUSL77)
 function generateProfileId(): string {
@@ -35,6 +26,91 @@ async function hashPasscode(passcode: string): Promise<string> {
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// -------------------------------------------------------------
+// Client-side Local Storage Adapter (For static hosting e.g. GitHub Pages)
+// -------------------------------------------------------------
+const LOCAL_PROFILES_KEY = 'calc_gpa_public_profiles';
+
+export function getLocalProfiles(filters?: ProfileFilterParams): any[] {
+  if (typeof window === 'undefined' || !window.localStorage) return [];
+  try {
+    const raw = localStorage.getItem(LOCAL_PROFILES_KEY);
+    let profiles: any[] = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(profiles)) return [];
+
+    if (filters) {
+      if (filters.search && filters.search.trim()) {
+        const sTerm = filters.search.trim().toLowerCase();
+        profiles = profiles.filter((p: any) => {
+          const matchesDirect =
+            (p.profile_name && p.profile_name.toLowerCase().includes(sTerm)) ||
+            (p.university && p.university.toLowerCase().includes(sTerm)) ||
+            (p.faculty && p.faculty.toLowerCase().includes(sTerm)) ||
+            (p.department && p.department.toLowerCase().includes(sTerm)) ||
+            (p.id && p.id.toLowerCase().includes(sTerm));
+          if (matchesDirect) return true;
+          return p.semesters && p.semesters.some((s: any) =>
+            s.subjects && s.subjects.some((sub: any) =>
+              (sub.subject_code && sub.subject_code.toLowerCase().includes(sTerm)) ||
+              (sub.subject_name && sub.subject_name.toLowerCase().includes(sTerm))
+            )
+          );
+        });
+      }
+      if (filters.university) profiles = profiles.filter(p => p.university === filters.university);
+      if (filters.faculty) profiles = profiles.filter(p => p.faculty === filters.faculty);
+      if (filters.department) profiles = profiles.filter(p => p.department === filters.department);
+      if (filters.academicYear) profiles = profiles.filter(p => p.academic_year === filters.academicYear);
+      if (filters.sort === 'university_asc') {
+        profiles.sort((a, b) => (a.university || '').localeCompare(b.university || ''));
+      } else if (filters.sort === 'faculty_asc') {
+        profiles.sort((a, b) => (a.faculty || '').localeCompare(b.faculty || ''));
+      } else {
+        profiles.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      }
+    }
+    return profiles;
+  } catch {
+    return [];
+  }
+}
+
+export function saveLocalProfile(profile: any): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    const existing = getLocalProfiles();
+    const idx = existing.findIndex(p => p.id === profile.id);
+    if (idx >= 0) {
+      existing[idx] = { ...existing[idx], ...profile, updated_at: new Date().toISOString() };
+    } else {
+      existing.unshift(profile);
+    }
+    localStorage.setItem(LOCAL_PROFILES_KEY, JSON.stringify(existing));
+    localStorage.setItem(`calc_gpa_profile_${profile.id}`, JSON.stringify(profile));
+  } catch {}
+}
+
+export function getLocalProfileById(id: string): any | null {
+  if (typeof window === 'undefined' || !window.localStorage) return null;
+  try {
+    const direct = localStorage.getItem(`calc_gpa_profile_${id}`);
+    if (direct) return JSON.parse(direct);
+    const existing = getLocalProfiles();
+    return existing.find(p => p.id === id) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function deleteLocalProfile(id: string): void {
+  if (typeof window === 'undefined' || !window.localStorage) return;
+  try {
+    const existing = getLocalProfiles().filter(p => p.id !== id);
+    localStorage.setItem(LOCAL_PROFILES_KEY, JSON.stringify(existing));
+    localStorage.removeItem(`calc_gpa_profile_${id}`);
+  } catch {}
 }
 
 // -------------------------------------------------------------
@@ -68,21 +144,6 @@ export async function safeFetchJson<T = any>(
   try {
     res = await fetch(input, mergedInit);
   } catch (netErr: any) {
-    // If running in browser and a relative /api endpoint failed on localhost, attempt direct connection to port 5000:
-    if (typeof window !== 'undefined' && typeof input === 'string' && input.startsWith('/api')) {
-      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      if (isLocalhost && window.location.port !== '5000') {
-        try {
-          const directRes = await fetch(`http://127.0.0.1:5000${input}`, mergedInit);
-          if (directRes.ok) {
-            const directText = await directRes.text();
-            if (!directText.trim().startsWith('<')) {
-              return JSON.parse(directText) as T;
-            }
-          }
-        } catch {}
-      }
-    }
     throw new Error(`Network error: ${netErr?.message || 'Unable to connect to the server'}`);
   }
 
@@ -99,23 +160,6 @@ export async function safeFetchJson<T = any>(
   const isHtml = contentType.includes('text/html') || /^\s*<!doctype\s+html/i.test(text) || /<html[\s>]/i.test(text);
 
   if (isHtml) {
-    // If on localhost in a browser and Vite proxied to index.html, try direct to Express backend port 5000:
-    if (typeof window !== 'undefined' && typeof input === 'string' && input.startsWith('/api')) {
-      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      if (isLocalhost && window.location.port !== '5000') {
-        try {
-          const directRes = await fetch(`http://127.0.0.1:5000${input}`, mergedInit);
-          const directText = await directRes.text();
-          const directContentType = (directRes.headers.get('content-type') || '').toLowerCase();
-          const directIsHtml = directContentType.includes('text/html') || /^\s*<!doctype\s+html/i.test(directText) || /<html[\s>]/i.test(directText);
-          if (!directIsHtml) {
-            const data = directText ? JSON.parse(directText) : {};
-            if (directRes.ok) return data as T;
-          }
-        } catch {}
-      }
-    }
-
     throw new Error(
       `API endpoint misconfigured: Server returned HTML instead of JSON. The backend route was not reached or was rewritten to index.html.`
     );
@@ -174,33 +218,6 @@ export async function fetchFilterOptions(): Promise<{
   degrees: string[];
   academicYears: string[];
 }> {
-  if (isSupabaseConfigured && supabase && !supabaseFailed) {
-    try {
-      const res: any = await withTimeout(
-        supabase
-          .from('profiles')
-          .select('university, faculty, department, academic_year')
-          .eq('visibility', 'public') as any,
-        3000
-      );
-      const data: any[] = res?.data || [];
-
-      const universities: string[] = Array.from(new Set(data.map((p: any) => p.university).filter(Boolean)));
-      universities.sort();
-      const faculties: string[] = Array.from(new Set(data.map((p: any) => p.faculty).filter(Boolean)));
-      faculties.sort();
-      const departments: string[] = Array.from(new Set(data.map((p: any) => p.department).filter(Boolean)));
-      departments.sort();
-      const academicYears: string[] = Array.from(new Set(data.map((p: any) => p.academic_year).filter(Boolean)));
-      academicYears.sort().reverse();
-
-      return { universities, faculties, departments, degrees: [], academicYears };
-    } catch {
-      supabaseFailed = true;
-      // Fallback to backend API
-    }
-  }
-
   try {
     const data = await safeFetchJson<any>(`${apiBase}/api/profiles/filters`);
     return {
@@ -211,7 +228,12 @@ export async function fetchFilterOptions(): Promise<{
       academicYears: data.academicYears || []
     };
   } catch {
-    return { universities: [], faculties: [], departments: [], degrees: [], academicYears: [] };
+    const local = getLocalProfiles();
+    const universities = Array.from(new Set(local.map((p: any) => p.university).filter(Boolean))).sort();
+    const faculties = Array.from(new Set(local.map((p: any) => p.faculty).filter(Boolean))).sort();
+    const departments = Array.from(new Set(local.map((p: any) => p.department).filter(Boolean))).sort();
+    const academicYears = Array.from(new Set(local.map((p: any) => p.academic_year).filter(Boolean))).sort().reverse();
+    return { universities, faculties, departments, degrees: [], academicYears };
   }
 }
 
@@ -220,145 +242,6 @@ export async function fetchPublicProfiles(paramsOrQuery: string | ProfileFilterP
     ? { search: paramsOrQuery }
     : paramsOrQuery;
 
-  if (isSupabaseConfigured && supabase && !supabaseFailed) {
-    try {
-      let query = supabase
-        .from('profiles')
-        .select(`
-          id, profile_name, university, faculty, department, degree, academic_year, visibility, created_at,
-          semesters (
-            id, semester_name, semester_order,
-            subjects (
-              id, subject_code, subject_name, credit
-            )
-          )
-        `)
-        .eq('visibility', 'public')
-        .limit(50);
-
-      if (filters.sort === 'university_asc') {
-        query = query.order('university', { ascending: true }).order('profile_name', { ascending: true });
-      } else if (filters.sort === 'faculty_asc') {
-        query = query.order('faculty', { ascending: true }).order('profile_name', { ascending: true });
-      } else {
-        query = query.order('created_at', { ascending: false });
-      }
-
-      if (filters.search && filters.search.trim()) {
-        const term = `%${filters.search.trim()}%`;
-        query = query.or(`profile_name.ilike.${term},university.ilike.${term},faculty.ilike.${term},department.ilike.${term},id.ilike.${term}`);
-      }
-      if (filters.university) query = query.eq('university', filters.university);
-      if (filters.faculty) query = query.eq('faculty', filters.faculty);
-      if (filters.department) query = query.eq('department', filters.department);
-      if (filters.academicYear) query = query.eq('academic_year', filters.academicYear);
-
-      const queryRes: any = await withTimeout(query as any, 3000);
-      let data: any = queryRes?.data;
-      let error: any = queryRes?.error;
-      if (error && (error.message.includes('department') || error.message.includes('schema cache'))) {
-        let fallbackQuery = supabase
-          .from('profiles')
-          .select(`
-            id, profile_name, university, faculty, academic_year, visibility, created_at,
-            semesters (
-              id, semester_name, semester_order,
-              subjects (
-                id, subject_code, subject_name, credit
-              )
-            )
-          `)
-          .eq('visibility', 'public')
-          .limit(50);
-
-        if (filters.sort === 'university_asc') {
-          fallbackQuery = fallbackQuery.order('university', { ascending: true });
-        } else if (filters.sort === 'faculty_asc') {
-          fallbackQuery = fallbackQuery.order('faculty', { ascending: true });
-        } else {
-          fallbackQuery = fallbackQuery.order('created_at', { ascending: false });
-        }
-
-        if (filters.search && filters.search.trim()) {
-          const term = `%${filters.search.trim()}%`;
-          fallbackQuery = fallbackQuery.or(`profile_name.ilike.${term},university.ilike.${term},faculty.ilike.${term},id.ilike.${term}`);
-        }
-        if (filters.university) fallbackQuery = fallbackQuery.eq('university', filters.university);
-        if (filters.faculty) fallbackQuery = fallbackQuery.eq('faculty', filters.faculty);
-        if (filters.academicYear) fallbackQuery = fallbackQuery.eq('academic_year', filters.academicYear);
-
-        const fbRes: any = await withTimeout(fallbackQuery as any, 3000);
-        data = (fbRes?.data || []).map((p: any) => ({ ...p, department: '', degree: '' }));
-        error = fbRes?.error;
-      }
-
-      if (!error && data) {
-        let results = (data || []).map((p: any) => {
-          let totalSubjects = 0;
-          let totalCredits = 0;
-          const semesterCount = p.semesters && Array.isArray(p.semesters) ? p.semesters.length : 0;
-          if (p.semesters && Array.isArray(p.semesters)) {
-            p.semesters.forEach((sem: any) => {
-              if (sem.subjects && Array.isArray(sem.subjects)) {
-                totalSubjects += sem.subjects.length;
-                sem.subjects.forEach((sub: any) => {
-                  totalCredits += Number(sub.credit || 0);
-                });
-              }
-            });
-          }
-          return {
-            ...p,
-            semester_count: semesterCount,
-            total_subjects: totalSubjects,
-            total_credits: Math.round(totalCredits * 100) / 100
-          };
-        });
-
-        // Search in module code or subject name if provided
-        if (filters.search && filters.search.trim()) {
-          const sTerm = filters.search.trim().toLowerCase();
-          results = results.filter((p: any) => {
-            const matchesDirect = 
-              (p.profile_name && p.profile_name.toLowerCase().includes(sTerm)) ||
-              (p.university && p.university.toLowerCase().includes(sTerm)) ||
-              (p.faculty && p.faculty.toLowerCase().includes(sTerm)) ||
-              (p.department && p.department.toLowerCase().includes(sTerm)) ||
-              (p.id && p.id.toLowerCase().includes(sTerm));
-            if (matchesDirect) return true;
-            return p.semesters && p.semesters.some((s: any) =>
-              s.subjects && s.subjects.some((sub: any) =>
-                (sub.subject_code && sub.subject_code.toLowerCase().includes(sTerm)) ||
-                (sub.subject_name && sub.subject_name.toLowerCase().includes(sTerm))
-              )
-            );
-          });
-        }
-
-        if (filters.semester && filters.semester.trim()) {
-          const semTerm = filters.semester.trim().toLowerCase();
-          results = results.filter((p: any) => p.semesters && p.semesters.some((s: any) => 
-            (s.semester_name && s.semester_name.toLowerCase().includes(semTerm)) ||
-            (s.semester_order && String(s.semester_order) === semTerm)
-          ));
-        }
-
-        // Apply sorting
-        if (filters.sort === 'university_asc') {
-          results.sort((a: any, b: any) => (a.university || '').localeCompare(b.university || ''));
-        } else if (filters.sort === 'faculty_asc') {
-          results.sort((a: any, b: any) => (a.faculty || '').localeCompare(b.faculty || ''));
-        }
-
-        return results;
-      }
-    } catch {
-      supabaseFailed = true;
-      // Supabase failed or timed out, seamlessly fallback to backend API
-    }
-  }
-
-  // Fallback to Express backend endpoint
   const searchParams = new URLSearchParams();
   if (filters.search) searchParams.set('search', filters.search);
   if (filters.university) searchParams.set('university', filters.university);
@@ -371,111 +254,43 @@ export async function fetchPublicProfiles(paramsOrQuery: string | ProfileFilterP
   const queryString = searchParams.toString();
   const url = queryString ? `${apiBase}/api/profiles?${queryString}` : `${apiBase}/api/profiles`;
   
-  const data = await safeFetchJson<any>(url, undefined, 'Failed to fetch profiles. Please try again.');
-  if (data && Array.isArray(data.profiles)) {
-    return data.profiles;
+  try {
+    const data = await safeFetchJson<any>(url, undefined, 'Failed to fetch profiles. Please try again.');
+    if (data && Array.isArray(data.profiles)) {
+      return data.profiles;
+    }
+    if (Array.isArray(data)) {
+      return data;
+    }
+    return [];
+  } catch (err) {
+    // If backend is unavailable or offline, check if we have matching local profiles
+    const localProfiles = getLocalProfiles(filters);
+    if (localProfiles.length > 0) {
+      return localProfiles;
+    }
+    throw err;
   }
-  if (Array.isArray(data)) {
-    return data;
-  }
-  return [];
 }
 
 export async function fetchProfileById(profileId: string): Promise<Profile> {
   const cleanId = profileId.trim().toUpperCase();
 
-  if (isSupabaseConfigured && supabase && !supabaseFailed) {
-    try {
-      // 1. Get profile row
-      let { data: profile, error: pErr } = await supabase
-        .from('profiles')
-        .select('id, profile_name, university, faculty, department, academic_year, description, visibility, created_at, updated_at, passcode_hash')
-        .eq('id', cleanId)
-        .single();
-
-      if (pErr && (pErr.message.includes('department') || pErr.message.includes('schema cache'))) {
-        const fb = await supabase
-          .from('profiles')
-          .select('id, profile_name, university, faculty, academic_year, description, visibility, created_at, updated_at, passcode_hash')
-          .eq('id', cleanId)
-          .single();
-        profile = fb.data ? { ...fb.data, department: '' } : null;
-        pErr = fb.error;
-      }
-
-      if (pErr || !profile) {
-        throw new Error('Profile not found. Please check the Profile ID or URL link.');
-      }
-
-      // 2. Get semesters & subjects
-      const { data: semesters, error: sErr } = await supabase
-        .from('semesters')
-        .select('id, semester_name, semester_order')
-        .eq('profile_id', cleanId)
-        .order('semester_order', { ascending: true });
-
-      if (sErr) throw new Error(sErr.message);
-
-      const formattedSemesters: Semester[] = [];
-      for (const sem of semesters || []) {
-        const { data: subjects, error: subErr } = await supabase
-          .from('subjects')
-          .select('id, subject_code, subject_name, credit')
-          .eq('semester_id', sem.id)
-          .order('id', { ascending: true });
-
-        if (subErr) throw new Error(subErr.message);
-
-        formattedSemesters.push({
-          id: sem.id,
-          semester_name: sem.semester_name,
-          semester_order: sem.semester_order,
-          subjects: (subjects || []).map((sub: any) => ({
-            id: sub.id,
-            subject_code: sub.subject_code || '',
-            subject_name: sub.subject_name,
-            credit: Number(sub.credit)
-          }))
-        });
-      }
-
-      // 3. Get grading scale
-      const { data: scales } = await supabase
-        .from('grading_scales')
-        .select('grade, grade_point')
-        .eq('profile_id', cleanId)
-        .order('grade_point', { ascending: false });
-
-      const gradingScale: GradeOption[] = (scales && scales.length > 0)
-        ? scales.map((s: any) => ({ grade: s.grade, grade_point: Number(s.grade_point) }))
-        : DEFAULT_GRADING_SCALE;
-
-      return {
-        id: profile.id,
-        profile_name: profile.profile_name,
-        university: profile.university,
-        faculty: profile.faculty,
-        department: profile.department || '',
-        academic_year: profile.academic_year || '',
-        description: profile.description || '',
-        visibility: profile.visibility as any,
-        has_passcode: Boolean(profile.passcode_hash && profile.passcode_hash.length > 0),
-        created_at: profile.created_at,
-        updated_at: profile.updated_at,
-        semesters: formattedSemesters,
-        gradingScale
-      };
-    } catch {
-      supabaseFailed = true;
-      // Fall through to API
+  try {
+    const data = await safeFetchJson<any>(`${apiBase}/api/profiles/${cleanId}`, undefined, 'Profile not found. Please check the Profile ID or link.');
+    if (data && data.profile) {
+      return data.profile;
     }
+    if (data && data.id) {
+      return data;
+    }
+  } catch (err) {
+    const local = getLocalProfileById(cleanId);
+    if (local) return local;
+    throw err;
   }
 
-  const data = await safeFetchJson<any>(`${apiBase}/api/profiles/${cleanId}`, undefined, 'Profile not found. Please check the Profile ID or link.');
-  if (data && data.profile) {
-    return data.profile;
-  }
-  return data;
+  throw new Error('Profile not found. Please check the Profile ID or link.');
 }
 
 export async function createProfile(profileData: {
@@ -491,145 +306,83 @@ export async function createProfile(profileData: {
   semesters: Semester[];
   gradingScale?: GradeOption[];
 }): Promise<{ id: string }> {
-  if (isSupabaseConfigured && supabase && !supabaseFailed) {
-    try {
-      const profileId = generateProfileId();
-      const passcodeHash = profileData.passcode ? await hashPasscode(profileData.passcode) : '';
+  try {
+    const data = await safeFetchJson<{ success?: boolean; id: string; error?: string }>(
+      `${apiBase}/api/profiles`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profileData)
+      },
+      'Failed to create profile.'
+    );
 
-      // Insert profile
-      let { error: pErr } = await supabase
-        .from('profiles')
-        .insert({
-          id: profileId,
-          profile_name: profileData.profile_name.trim(),
-          university: (profileData.university || '').trim(),
-          faculty: (profileData.faculty || '').trim(),
-          department: (profileData.department || '').trim(),
-          degree: (profileData.degree || '').trim(),
-          academic_year: (profileData.academic_year || '').trim(),
-          description: (profileData.description || '').trim(),
-          visibility: profileData.visibility || 'public',
-          passcode_hash: passcodeHash
-        });
-
-      if (pErr && (pErr.message.includes('department') || pErr.message.includes('schema cache'))) {
-        const fb = await supabase
-          .from('profiles')
-          .insert({
-          id: profileId,
-          profile_name: profileData.profile_name.trim(),
-          university: (profileData.university || '').trim(),
-          faculty: (profileData.faculty || '').trim(),
-          degree: (profileData.degree || '').trim(),
-          academic_year: (profileData.academic_year || '').trim(),
-          description: (profileData.description || '').trim(),
-          visibility: profileData.visibility || 'public',
-          passcode_hash: passcodeHash
-        });
-        pErr = fb.error;
-      }
-
-      if (pErr) throw new Error(pErr.message);
-
-      // Insert semesters & subjects
-      let semOrder = 1;
-      for (const sem of profileData.semesters) {
-        const { data: semRow, error: semErr } = await supabase
-          .from('semesters')
-          .insert({
-            profile_id: profileId,
-            semester_name: sem.semester_name || `Semester ${semOrder}`,
-            semester_order: semOrder
-          })
-          .select('id')
-          .single();
-
-        if (semErr) throw new Error(semErr.message);
-
-        if (sem.subjects && Array.isArray(sem.subjects)) {
-          const subjectRows = sem.subjects
-            .filter(sub => sub.subject_name)
-            .map(sub => ({
-              semester_id: semRow.id,
-              subject_code: (sub.subject_code || '').trim(),
-              subject_name: (sub.subject_name || '').trim(),
-              credit: Number(sub.credit || 0)
-            }));
-
-          if (subjectRows.length > 0) {
-            const { error: subInsertErr } = await supabase.from('subjects').insert(subjectRows);
-            if (subInsertErr) throw new Error(subInsertErr.message);
-          }
-        }
-        semOrder++;
-      }
-
-      // Insert grading scale
-      const scaleToInsert = (profileData.gradingScale && profileData.gradingScale.length > 0)
-        ? profileData.gradingScale
-        : DEFAULT_GRADING_SCALE;
-
-      const scaleRows = scaleToInsert.map(gs => ({
-        profile_id: profileId,
-        grade: gs.grade.trim(),
-        grade_point: Number(gs.grade_point)
-      }));
-
-      const { error: scaleErr } = await supabase.from('grading_scales').insert(scaleRows);
-      if (scaleErr) throw new Error(scaleErr.message);
-
-      return { id: profileId };
-    } catch {
-      supabaseFailed = true;
-      // Fall through to backend API
+    if (data && data.id) {
+      saveLocalProfile({
+        ...profileData,
+        id: data.id,
+        created_at: new Date().toISOString(),
+        total_credits: (profileData.semesters || []).reduce((acc, sem) => 
+          acc + (sem.subjects || []).reduce((sAcc, sub) => sAcc + Number(sub.credit || 0), 0), 0),
+        total_subjects: (profileData.semesters || []).reduce((acc, sem) => acc + (sem.subjects || []).length, 0),
+        semester_count: (profileData.semesters || []).length
+      });
+      return { id: data.id };
     }
+  } catch {
+    // If backend is unavailable (e.g. offline/static host), fallback to saving to local storage
+    const profileId = generateProfileId();
+    const passcodeHash = profileData.passcode ? await hashPasscode(profileData.passcode) : '';
+    const fullProfile = {
+      id: profileId,
+      profile_name: profileData.profile_name.trim(),
+      university: (profileData.university || '').trim(),
+      faculty: (profileData.faculty || '').trim(),
+      department: (profileData.department || '').trim(),
+      degree: (profileData.degree || '').trim(),
+      academic_year: (profileData.academic_year || '').trim(),
+      description: (profileData.description || '').trim(),
+      visibility: profileData.visibility || 'public',
+      has_passcode: Boolean(profileData.passcode),
+      passcode_hash: passcodeHash,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      semesters: profileData.semesters || [],
+      gradingScale: profileData.gradingScale || DEFAULT_GRADING_SCALE,
+      total_credits: (profileData.semesters || []).reduce((acc, sem) => 
+        acc + (sem.subjects || []).reduce((sAcc, sub) => sAcc + Number(sub.credit || 0), 0), 0),
+      total_subjects: (profileData.semesters || []).reduce((acc, sem) => acc + (sem.subjects || []).length, 0),
+      semester_count: (profileData.semesters || []).length
+    };
+    saveLocalProfile(fullProfile);
+    return { id: profileId };
   }
 
-  const data = await safeFetchJson<{ success?: boolean; id: string; error?: string }>(
-    `${apiBase}/api/profiles`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(profileData)
-    },
-    'Failed to create profile.'
-  );
-
-  return { id: data.id };
+  throw new Error('Failed to create profile.');
 }
 
 export async function verifyOwnerPasscode(profileId: string, passcode: string): Promise<boolean> {
   const cleanId = profileId.trim().toUpperCase();
 
-  if (isSupabaseConfigured && supabase && !supabaseFailed) {
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('passcode_hash')
-        .eq('id', cleanId)
-        .single();
-
-      if (error || !data) throw new Error('Profile not found');
-      if (!data.passcode_hash) return true; // No passcode required
-
+  try {
+    const data = await safeFetchJson<{ success?: boolean; valid: boolean; error?: string }>(
+      `${apiBase}/api/profiles/${cleanId}/verify-passcode`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passcode })
+      }
+    );
+    return Boolean(data.valid);
+  } catch {
+    const local = getLocalProfileById(cleanId);
+    if (local) {
+      if (!local.passcode_hash) return true;
       const inputHash = await hashPasscode(passcode || '');
-      return inputHash === data.passcode_hash;
-    } catch {
-      supabaseFailed = true;
-      // Fall through to backend API
+      return inputHash === local.passcode_hash;
     }
+    return false;
   }
-
-  const data = await safeFetchJson<{ success?: boolean; valid: boolean; error?: string }>(
-    `${apiBase}/api/profiles/${cleanId}/verify-passcode`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ passcode })
-    }
-  );
-
-  return Boolean(data.valid);
 }
 
 export async function updateProfile(
@@ -650,144 +403,63 @@ export async function updateProfile(
 ): Promise<boolean> {
   const cleanId = profileId.trim().toUpperCase();
 
-  if (isSupabaseConfigured && supabase && !supabaseFailed) {
-    try {
-      // Verify passcode first
-      const isValid = await verifyOwnerPasscode(cleanId, passcode);
-      if (!isValid) throw new Error('Unauthorized. Invalid owner passcode.');
-
-      // Update profile row
-      let { error: pErr } = await supabase
-        .from('profiles')
-        .update({
-          profile_name: updateData.profile_name.trim(),
-          university: updateData.university.trim(),
-          faculty: updateData.faculty.trim(),
-          department: (updateData.department || '').trim(),
-          degree: (updateData.degree || '').trim(),
-          academic_year: (updateData.academic_year || '').trim(),
-          description: (updateData.description || '').trim(),
-          visibility: updateData.visibility || 'public',
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', cleanId);
-
-      if (pErr && (pErr.message.includes('department') || pErr.message.includes('schema cache'))) {
-        const fb = await supabase
-          .from('profiles')
-          .update({
-            profile_name: updateData.profile_name.trim(),
-            university: updateData.university.trim(),
-            faculty: updateData.faculty.trim(),
-            degree: (updateData.degree || '').trim(),
-            academic_year: (updateData.academic_year || '').trim(),
-            description: (updateData.description || '').trim(),
-            visibility: updateData.visibility || 'public',
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', cleanId);
-        pErr = fb.error;
-      }
-
-      if (pErr) throw new Error(pErr.message);
-
-      // Delete old semesters and scales
-      await supabase.from('semesters').delete().eq('profile_id', cleanId);
-      await supabase.from('grading_scales').delete().eq('profile_id', cleanId);
-
-      // Re-insert semesters & subjects
-      let semOrder = 1;
-      for (const sem of updateData.semesters) {
-        const { data: semRow, error: semErr } = await supabase
-          .from('semesters')
-          .insert({
-            profile_id: cleanId,
-            semester_name: sem.semester_name || `Semester ${semOrder}`,
-            semester_order: semOrder
-          })
-          .select('id')
-          .single();
-
-        if (semErr) throw new Error(semErr.message);
-
-        if (sem.subjects && Array.isArray(sem.subjects)) {
-          const subjectRows = sem.subjects
-            .filter(sub => sub.subject_name && Number(sub.credit) >= 0)
-            .map(sub => ({
-              semester_id: semRow.id,
-              subject_code: sub.subject_code || '',
-              subject_name: sub.subject_name.trim(),
-              credit: Number(sub.credit)
-            }));
-
-          if (subjectRows.length > 0) {
-            await supabase.from('subjects').insert(subjectRows);
-          }
+  try {
+    await safeFetchJson(
+      `${apiBase}/api/profiles/${cleanId}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passcode, ...updateData })
+      },
+      'Failed to update profile.'
+    );
+    saveLocalProfile({ ...updateData, id: cleanId, updated_at: new Date().toISOString() });
+    return true;
+  } catch (err) {
+    const local = getLocalProfileById(cleanId);
+    if (local) {
+      if (local.passcode_hash) {
+        const inputHash = await hashPasscode(passcode || '');
+        if (inputHash !== local.passcode_hash) {
+          throw new Error('Unauthorized. Invalid owner passcode.');
         }
-        semOrder++;
       }
-
-      // Re-insert scales
-      const scaleToInsert = (updateData.gradingScale && updateData.gradingScale.length > 0)
-        ? updateData.gradingScale
-        : DEFAULT_GRADING_SCALE;
-
-      const scaleRows = scaleToInsert.map(gs => ({
-        profile_id: cleanId,
-        grade: gs.grade.trim(),
-        grade_point: Number(gs.grade_point)
-      }));
-
-      await supabase.from('grading_scales').insert(scaleRows);
-
+      saveLocalProfile({ ...local, ...updateData, id: cleanId, updated_at: new Date().toISOString() });
       return true;
-    } catch {
-      supabaseFailed = true;
-      // Fall through to backend API
     }
+    throw err;
   }
-
-  await safeFetchJson(
-    `${apiBase}/api/profiles/${cleanId}`,
-    {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ passcode, ...updateData })
-    },
-    'Failed to update profile.'
-  );
-
-  return true;
 }
 
 export async function deleteProfile(profileId: string, passcode: string): Promise<boolean> {
   const cleanId = profileId.trim().toUpperCase();
 
-  if (isSupabaseConfigured && supabase && !supabaseFailed) {
-    try {
-      const isValid = await verifyOwnerPasscode(cleanId, passcode);
-      if (!isValid) throw new Error('Unauthorized. Invalid owner passcode.');
-
-      const { error } = await supabase.from('profiles').delete().eq('id', cleanId);
-      if (error) throw new Error(error.message);
+  try {
+    await safeFetchJson(
+      `${apiBase}/api/profiles/${cleanId}`,
+      {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passcode })
+      },
+      'Failed to delete profile.'
+    );
+    deleteLocalProfile(cleanId);
+    return true;
+  } catch (err) {
+    const local = getLocalProfileById(cleanId);
+    if (local) {
+      if (local.passcode_hash) {
+        const inputHash = await hashPasscode(passcode || '');
+        if (inputHash !== local.passcode_hash) {
+          throw new Error('Unauthorized. Invalid owner passcode.');
+        }
+      }
+      deleteLocalProfile(cleanId);
       return true;
-    } catch {
-      supabaseFailed = true;
-      // Fall through to backend API
     }
+    throw err;
   }
-
-  await safeFetchJson(
-    `${apiBase}/api/profiles/${cleanId}`,
-    {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ passcode })
-    },
-    'Failed to delete profile.'
-  );
-
-  return true;
 }
 
 export function extractProfileFallbackClient(inputText: string): any {

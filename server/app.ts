@@ -4,6 +4,15 @@ import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
 import db from './db';
+import {
+  getSupabaseProfiles,
+  getSupabaseFilterOptions,
+  getSupabaseProfileById,
+  createSupabaseProfile,
+  updateSupabaseProfile,
+  deleteSupabaseProfile,
+  verifySupabasePasscode
+} from './supabase';
 
 const app = express();
 
@@ -308,6 +317,22 @@ function normalizeAiProfileOutput(raw: any) {
 // API Routes
 // -------------------------------------------------------------
 
+// GET /api - API Root status endpoint
+app.get(['/api', '/api/'], (req: Request, res: Response) => {
+  res.json({
+    success: true,
+    message: 'Calculate GPA Plus API is running',
+    version: '1.0.0',
+    endpoints: [
+      '/api/health',
+      '/api/profiles',
+      '/api/profiles/filters',
+      '/api/profiles/:id',
+      '/api/ai/extract-profile'
+    ]
+  });
+});
+
 // GET /api/health - Diagnostic endpoint to confirm API is live and responding with JSON
 app.get(['/api/health', '/health'], (req: Request, res: Response) => {
   res.json({
@@ -318,8 +343,16 @@ app.get(['/api/health', '/health'], (req: Request, res: Response) => {
 });
 
 // GET /api/profiles/filters - Return available filter options from database
-app.get(['/api/profiles/filters', '/profiles/filters'], (req: Request, res: Response) => {
+app.get(['/api/profiles/filters', '/profiles/filters'], async (req: Request, res: Response) => {
   try {
+    const supaFilters = await getSupabaseFilterOptions();
+    if (supaFilters) {
+      return res.json({
+        success: true,
+        ...supaFilters
+      });
+    }
+
     const universities = db.prepare("SELECT DISTINCT university FROM profiles WHERE visibility = 'public' AND university != '' ORDER BY university ASC").all().map((r: any) => r.university);
     const faculties = db.prepare("SELECT DISTINCT faculty FROM profiles WHERE visibility = 'public' AND faculty != '' ORDER BY faculty ASC").all().map((r: any) => r.faculty);
     const departments = db.prepare("SELECT DISTINCT department FROM profiles WHERE visibility = 'public' AND department != '' ORDER BY department ASC").all().map((r: any) => r.department);
@@ -339,7 +372,7 @@ app.get(['/api/profiles/filters', '/profiles/filters'], (req: Request, res: Resp
 });
 
 // GET /api/profiles - List public profiles with multi-filtering and sorting
-app.get(['/api/profiles', '/profiles'], (req: Request, res: Response) => {
+app.get(['/api/profiles', '/profiles'], async (req: Request, res: Response) => {
   try {
     const {
       search = '',
@@ -350,6 +383,23 @@ app.get(['/api/profiles', '/profiles'], (req: Request, res: Response) => {
       semester = '',
       sort = 'newest'
     } = req.query;
+
+    const supaProfiles = await getSupabaseProfiles({
+      search: String(search),
+      university: String(university),
+      faculty: String(faculty),
+      department: String(department),
+      academic_year: String(academic_year),
+      semester: String(semester),
+      sort: String(sort)
+    });
+
+    if (supaProfiles !== null) {
+      return res.json({
+        success: true,
+        profiles: supaProfiles
+      });
+    }
 
     let queryStr = `
       SELECT p.id, p.profile_name, p.university, p.faculty, p.department, p.academic_year, p.visibility, p.created_at,
@@ -430,9 +480,19 @@ app.get(['/api/profiles', '/profiles'], (req: Request, res: Response) => {
 });
 
 // GET /api/profiles/:id - Fetch single profile with all details
-app.get(['/api/profiles/:id', '/profiles/:id'], (req: Request, res: Response) => {
+app.get(['/api/profiles/:id', '/profiles/:id'], async (req: Request, res: Response) => {
   try {
     const profileId = (req.params.id as string).toUpperCase();
+
+    const supaProfile = await getSupabaseProfileById(profileId);
+    if (supaProfile) {
+      return res.json({
+        success: true,
+        profile: supaProfile,
+        ...supaProfile
+      });
+    }
+
     const profile = db.prepare(`
       SELECT id, profile_name, university, faculty, department, academic_year, description, visibility, created_at, updated_at,
              CASE WHEN passcode_hash IS NOT NULL AND passcode_hash != '' THEN 1 ELSE 0 END as has_passcode
@@ -480,7 +540,7 @@ app.get(['/api/profiles/:id', '/profiles/:id'], (req: Request, res: Response) =>
 });
 
 // POST /api/profiles - Create a new profile
-app.post(['/api/profiles', '/profiles'], (req: Request, res: Response) => {
+app.post(['/api/profiles', '/profiles'], async (req: Request, res: Response) => {
   try {
     const {
       profile_name,
@@ -506,6 +566,21 @@ app.post(['/api/profiles', '/profiles'], (req: Request, res: Response) => {
     }
 
     const hashed = hashPasscode(passcode);
+
+    // Persist to Supabase if configured
+    await createSupabaseProfile(profileId, {
+      profile_name,
+      university,
+      faculty,
+      department,
+      degree: '',
+      academic_year,
+      description,
+      visibility,
+      passcode_hash: hashed,
+      semesters,
+      gradingScale
+    });
 
     const insertProfile = db.prepare(`
       INSERT INTO profiles (id, profile_name, university, faculty, department, degree, academic_year, description, visibility, passcode_hash)
@@ -572,34 +647,41 @@ app.post(['/api/profiles', '/profiles'], (req: Request, res: Response) => {
 });
 
 // POST /api/profiles/:id/verify-passcode
-app.post(['/api/profiles/:id/verify-passcode', '/profiles/:id/verify-passcode'], (req: Request, res: Response) => {
+app.post(['/api/profiles/:id/verify-passcode', '/profiles/:id/verify-passcode'], async (req: Request, res: Response) => {
   try {
     const profileId = (req.params.id as string).toUpperCase();
     const { passcode } = req.body;
+    const hashed = hashPasscode(passcode || '');
 
     const profile = db.prepare('SELECT passcode_hash FROM profiles WHERE id = ?').get(profileId) as any;
-    if (!profile) {
-      return res.status(404).json({ success: false, error: 'Profile not found' });
+    if (profile) {
+      if (!profile.passcode_hash) {
+        return res.json({ success: true, valid: true });
+      }
+      if (hashed === profile.passcode_hash) {
+        return res.json({ success: true, valid: true });
+      } else {
+        return res.status(401).json({ success: false, valid: false, error: 'Incorrect owner passcode.' });
+      }
     }
 
-    if (!profile.passcode_hash) {
-      // No passcode required
-      return res.json({ success: true, valid: true });
+    const supaCheck = await verifySupabasePasscode(profileId, hashed);
+    if (supaCheck.exists) {
+      if (supaCheck.valid) {
+        return res.json({ success: true, valid: true });
+      } else {
+        return res.status(401).json({ success: false, valid: false, error: 'Incorrect owner passcode.' });
+      }
     }
 
-    const hashed = hashPasscode(passcode || '');
-    if (hashed === profile.passcode_hash) {
-      return res.json({ success: true, valid: true });
-    } else {
-      return res.status(401).json({ success: false, valid: false, error: 'Incorrect owner passcode.' });
-    }
+    return res.status(404).json({ success: false, error: 'Profile not found' });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
 // PUT /api/profiles/:id - Update profile
-app.put(['/api/profiles/:id', '/profiles/:id'], (req: Request, res: Response) => {
+app.put(['/api/profiles/:id', '/profiles/:id'], async (req: Request, res: Response) => {
   try {
     const profileId = (req.params.id as string).toUpperCase();
     const {
@@ -615,77 +697,98 @@ app.put(['/api/profiles/:id', '/profiles/:id'], (req: Request, res: Response) =>
       gradingScale = DEFAULT_GRADING_SCALE
     } = req.body;
 
+    const hashedInput = hashPasscode(passcode || '');
     const existing = db.prepare('SELECT passcode_hash FROM profiles WHERE id = ?').get(profileId) as any;
-    if (!existing) {
-      return res.status(404).json({ success: false, error: 'Profile not found' });
-    }
 
-    if (existing.passcode_hash) {
-      const hashedInput = hashPasscode(passcode || '');
-      if (hashedInput !== existing.passcode_hash) {
+    if (existing) {
+      if (existing.passcode_hash && hashedInput !== existing.passcode_hash) {
+        return res.status(401).json({ success: false, error: 'Unauthorized. Invalid owner passcode.' });
+      }
+    } else {
+      const supaCheck = await verifySupabasePasscode(profileId, hashedInput);
+      if (!supaCheck.exists) {
+        return res.status(404).json({ success: false, error: 'Profile not found' });
+      }
+      if (!supaCheck.valid) {
         return res.status(401).json({ success: false, error: 'Unauthorized. Invalid owner passcode.' });
       }
     }
 
-    const updateProfile = db.prepare(`
-      UPDATE profiles
-      SET profile_name = ?, university = ?, faculty = ?, department = ?, academic_year = ?, description = ?, visibility = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `);
-
-    const deleteSemesters = db.prepare('DELETE FROM semesters WHERE profile_id = ?');
-    const deleteScales = db.prepare('DELETE FROM grading_scales WHERE profile_id = ?');
-
-    const insertSemester = db.prepare(`
-      INSERT INTO semesters (profile_id, semester_name, semester_order)
-      VALUES (?, ?, ?)
-    `);
-    const insertSubject = db.prepare(`
-      INSERT INTO subjects (semester_id, subject_code, subject_name, credit)
-      VALUES (?, ?, ?, ?)
-    `);
-    const insertScale = db.prepare(`
-      INSERT INTO grading_scales (profile_id, grade, grade_point)
-      VALUES (?, ?, ?)
-    `);
-
-    const transaction = db.transaction(() => {
-      updateProfile.run(
-        profile_name.trim(),
-        (university || '').trim(),
-        (faculty || '').trim(),
-        (department || '').trim(),
-        (academic_year || '').trim(),
-        (description || '').trim(),
-        visibility,
-        profileId
-      );
-
-      deleteSemesters.run(profileId);
-      deleteScales.run(profileId);
-
-      let order = 1;
-      for (const sem of semesters) {
-        const semResult = insertSemester.run(profileId, sem.semester_name || `Semester ${order}`, order);
-        const semId = semResult.lastInsertRowid;
-
-        if (sem.subjects && Array.isArray(sem.subjects)) {
-          for (const sub of sem.subjects) {
-            const creditVal = parseFloat(sub.credit);
-            if (sub.subject_name && !isNaN(creditVal) && creditVal >= 0) {
-              insertSubject.run(semId, sub.subject_code || '', sub.subject_name.trim(), creditVal);
-            }
-          }
-        }
-        order++;
-      }
-
-      for (const gs of gradingScale) {
-        insertScale.run(profileId, gs.grade.trim(), parseFloat(gs.grade_point));
-      }
+    // Update in Supabase
+    await updateSupabaseProfile(profileId, {
+      profile_name,
+      university,
+      faculty,
+      department,
+      academic_year,
+      description,
+      visibility,
+      semesters,
+      gradingScale
     });
 
-    transaction();
+    // Update in local SQLite if present
+    if (existing) {
+      const updateProfile = db.prepare(`
+        UPDATE profiles
+        SET profile_name = ?, university = ?, faculty = ?, department = ?, academic_year = ?, description = ?, visibility = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `);
+
+      const deleteSemesters = db.prepare('DELETE FROM semesters WHERE profile_id = ?');
+      const deleteScales = db.prepare('DELETE FROM grading_scales WHERE profile_id = ?');
+
+      const insertSemester = db.prepare(`
+        INSERT INTO semesters (profile_id, semester_name, semester_order)
+        VALUES (?, ?, ?)
+      `);
+      const insertSubject = db.prepare(`
+        INSERT INTO subjects (semester_id, subject_code, subject_name, credit)
+        VALUES (?, ?, ?, ?)
+      `);
+      const insertScale = db.prepare(`
+        INSERT INTO grading_scales (profile_id, grade, grade_point)
+        VALUES (?, ?, ?)
+      `);
+
+      const transaction = db.transaction(() => {
+        updateProfile.run(
+          profile_name.trim(),
+          (university || '').trim(),
+          (faculty || '').trim(),
+          (department || '').trim(),
+          (academic_year || '').trim(),
+          (description || '').trim(),
+          visibility,
+          profileId
+        );
+
+        deleteSemesters.run(profileId);
+        deleteScales.run(profileId);
+
+        let order = 1;
+        for (const sem of semesters) {
+          const semResult = insertSemester.run(profileId, sem.semester_name || `Semester ${order}`, order);
+          const semId = semResult.lastInsertRowid;
+
+          if (sem.subjects && Array.isArray(sem.subjects)) {
+            for (const sub of sem.subjects) {
+              const creditVal = parseFloat(sub.credit);
+              if (sub.subject_name && !isNaN(creditVal) && creditVal >= 0) {
+                insertSubject.run(semId, sub.subject_code || '', sub.subject_name.trim(), creditVal);
+              }
+            }
+          }
+          order++;
+        }
+
+        for (const gs of gradingScale) {
+          insertScale.run(profileId, gs.grade.trim(), parseFloat(gs.grade_point));
+        }
+      });
+
+      transaction();
+    }
 
     res.json({ success: true, message: 'Profile updated successfully' });
   } catch (error: any) {
@@ -694,23 +797,27 @@ app.put(['/api/profiles/:id', '/profiles/:id'], (req: Request, res: Response) =>
 });
 
 // DELETE /api/profiles/:id - Delete profile
-app.delete(['/api/profiles/:id', '/profiles/:id'], (req: Request, res: Response) => {
+app.delete(['/api/profiles/:id', '/profiles/:id'], async (req: Request, res: Response) => {
   try {
     const profileId = (req.params.id as string).toUpperCase();
     const { passcode } = req.body || {};
 
     const existing = db.prepare('SELECT passcode_hash FROM profiles WHERE id = ?').get(profileId) as any;
     if (!existing) {
-      return res.status(404).json({ success: false, error: 'Profile not found' });
+      const supaProfile = await getSupabaseProfileById(profileId);
+      if (!supaProfile) {
+        return res.status(404).json({ success: false, error: 'Profile not found' });
+      }
     }
 
-    if (existing.passcode_hash) {
+    if (existing && existing.passcode_hash) {
       const hashedInput = hashPasscode(passcode || '');
       if (hashedInput !== existing.passcode_hash) {
         return res.status(401).json({ success: false, error: 'Unauthorized. Invalid owner passcode.' });
       }
     }
 
+    await deleteSupabaseProfile(profileId);
     db.prepare('DELETE FROM profiles WHERE id = ?').run(profileId);
     res.json({ success: true, message: 'Profile deleted successfully' });
   } catch (error: any) {
