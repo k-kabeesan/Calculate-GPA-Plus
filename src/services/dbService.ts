@@ -836,9 +836,15 @@ export function normalizeExtractedProfileClient(raw: any) {
   let semester = raw.semester || '';
   if (semester === 'Not detected') semester = '';
 
-  let subjects: Array<{ moduleNumber: string; subjectName: string; credit: number | null }> = [];
+interface ExtractedSubject {
+  moduleNumber: string;
+  subjectName: string;
+  credit: number | null;
+}
 
-  const extractSubjectObj = (s: any) => {
+  let subjects: ExtractedSubject[] = [];
+
+  const extractSubjectObj = (s: any): ExtractedSubject => {
     const mod = (s.moduleNumber || s.subject_code || s.code || '').trim();
     let name = (s.subjectName || s.subject_name || s.name || mod || '').trim();
 
@@ -866,7 +872,7 @@ export function normalizeExtractedProfileClient(raw: any) {
   };
 
   if (Array.isArray(raw.subjects)) {
-    subjects = raw.subjects.map(extractSubjectObj).filter(s => s.moduleNumber || s.subjectName);
+    subjects = raw.subjects.map(extractSubjectObj).filter((s: ExtractedSubject) => s.moduleNumber || s.subjectName);
   } else if (Array.isArray(raw.semesters)) {
     raw.semesters.forEach((sem: any) => {
       if (!semester && sem.semester_name) {

@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from 'react';
 import {
-  TrendingUp,
   Award,
   AlertTriangle,
   CheckCircle2,

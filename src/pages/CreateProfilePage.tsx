@@ -12,10 +12,25 @@ import {
   RotateCcw,
   AlertTriangle
 } from 'lucide-react';
-import type { GradeOption, Semester, Subject } from '../types';
+import type { GradeOption, Subject } from '../types';
 import { DEFAULT_GRADING_SCALE } from '../utils/gpa';
 import { GradingScaleModal } from '../components/GradingScaleModal';
 import { createProfile } from '../services/dbService';
+
+interface FormSubject {
+  id?: string | number;
+  subject_code?: string;
+  subject_name: string;
+  credit: number | string;
+  selectedGrade?: string;
+}
+
+interface FormSemester {
+  id?: string | number;
+  semester_name: string;
+  semester_order: number;
+  subjects: FormSubject[];
+}
 
 interface CreateProfilePageProps {
   onProfileCreated: (profileId: string) => void;
@@ -50,19 +65,19 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
   const [showDraftBanner, setShowDraftBanner] = useState(false);
 
   // Semesters & Subjects state - start empty without prefilled sample values
-  const [semesters, setSemesters] = useState<Semester[]>([
+  const [semesters, setSemesters] = useState<FormSemester[]>([
     {
       semester_name: '',
       semester_order: 1,
       subjects: initialSubjects && initialSubjects.length > 0
         ? initialSubjects.map(s => ({
-            subject_code: (s as any).subject_code || (s as any).moduleNumber || '',
+            subject_code: s.subject_code || '',
             subject_name: s.subject_name || '',
-            credit: s.credit !== undefined && s.credit !== null && s.credit !== ('' as any) ? s.credit : ('' as any)
+            credit: s.credit !== undefined && s.credit !== null ? s.credit : ''
           }))
         : [
-            { subject_code: '', subject_name: '', credit: '' as any },
-            { subject_code: '', subject_name: '', credit: '' as any },
+            { subject_code: '', subject_name: '', credit: '' },
+            { subject_code: '', subject_name: '', credit: '' },
           ]
     }
   ]);
@@ -142,8 +157,8 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
         semester_name: '',
         semester_order: order,
         subjects: [
-          { subject_code: '', subject_name: '', credit: '' as any },
-          { subject_code: '', subject_name: '', credit: '' as any },
+          { subject_code: '', subject_name: '', credit: '' },
+          { subject_code: '', subject_name: '', credit: '' },
         ]
       }
     ]);
@@ -165,7 +180,7 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
     updated[semIdx].subjects.push({
       subject_code: '',
       subject_name: '',
-      credit: '' as any
+      credit: ''
     });
     setSemesters(updated);
   };
@@ -176,7 +191,7 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
     setSemesters(updated);
   };
 
-  const handleUpdateSubject = (semIdx: number, subIdx: number, field: keyof Subject, val: any) => {
+  const handleUpdateSubject = (semIdx: number, subIdx: number, field: keyof FormSubject, val: any) => {
     const updated = [...semesters];
     updated[semIdx].subjects[subIdx] = {
       ...updated[semIdx].subjects[subIdx],
@@ -210,7 +225,7 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
 
     const codeCounts: { [code: string]: number } = {};
     for (const sub of sem.subjects) {
-      const code = ((sub as any).subject_code || '').trim().toUpperCase();
+      const code = (sub.subject_code || '').trim().toUpperCase();
       if (code) {
         codeCounts[code] = (codeCounts[code] || 0) + 1;
       }
@@ -235,7 +250,7 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
       }
 
       sem.subjects.forEach((sub, subIdx) => {
-        const hasCode = Boolean((sub as any).subject_code && (sub as any).subject_code.trim());
+        const hasCode = Boolean(sub.subject_code && sub.subject_code.trim());
         const hasName = Boolean(sub.subject_name && sub.subject_name.trim());
 
         if (hasCode || hasName) {
@@ -278,10 +293,13 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
       ...sem,
       semester_name: sem.semester_name.trim() || `Semester ${idx + 1}`,
       subjects: sem.subjects.filter(sub => {
-        const hasText = sub.subject_name.trim() || ((sub as any).subject_code && (sub as any).subject_code.trim());
+        const hasText = Boolean(sub.subject_name.trim() || (sub.subject_code && sub.subject_code.trim()));
         const isValidCredit = sub.credit !== '' && sub.credit !== null && sub.credit !== undefined && !isNaN(Number(sub.credit)) && Number(sub.credit) >= 0;
         return hasText && isValidCredit;
-      })
+      }).map(sub => ({
+        ...sub,
+        credit: Number(sub.credit)
+      }))
     })).filter(sem => sem.subjects.length > 0);
 
     setSubmitting(true);
@@ -638,8 +656,8 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
                           <div className="col-span-4 sm:col-span-3">
                             <input
                               type="text"
-                              value={(sub as any).subject_code || ''}
-                              onChange={(e) => handleUpdateSubject(semIdx, subIdx, 'subject_code' as any, e.target.value.toUpperCase())}
+                              value={sub.subject_code || ''}
+                              onChange={(e) => handleUpdateSubject(semIdx, subIdx, 'subject_code', e.target.value.toUpperCase())}
                               placeholder="e.g. NANO2112"
                               className="w-full px-2.5 py-1.5 text-xs font-mono font-bold text-slate-900 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 placeholder-slate-400"
                             />
@@ -684,7 +702,7 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
                               type="button"
                               onClick={() => handleRemoveSubject(semIdx, subIdx)}
                               disabled={sem.subjects.length <= 1}
-                              aria-label={`Delete ${sub.subject_name || (sub as any).subject_code || 'subject'}`}
+                              aria-label={`Delete ${sub.subject_name || sub.subject_code || 'subject'}`}
                               className="p-1.5 text-slate-400 hover:text-red-600 disabled:opacity-30 transition-colors"
                             >
                               <Trash2 className="w-4 h-4" />
