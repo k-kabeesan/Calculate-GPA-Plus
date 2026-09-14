@@ -561,7 +561,24 @@ app.post(['/api/profiles', '/profiles'], async (req: Request, res: Response) => 
     } = req.body;
 
     if (!profile_name || !profile_name.trim()) {
-      return res.status(400).json({ success: false, error: 'Profile Name is required.' });
+      return res.status(400).json({ success: false, error: 'Profile name is required.' });
+    }
+
+    if (!passcode || !passcode.trim()) {
+      return res.status(400).json({ success: false, error: 'Owner edit passcode is required.' });
+    }
+
+    for (const sem of semesters || []) {
+      for (const sub of sem.subjects || []) {
+        const code = (sub.subject_code || sub.module_number || '').trim();
+        const name = (sub.subject_name || '').trim();
+        if (code || name) {
+          const isCreditMissing = sub.credit === null || sub.credit === undefined || sub.credit === '' || isNaN(Number(sub.credit)) || Number(sub.credit) < 0;
+          if (isCreditMissing) {
+            return res.status(400).json({ success: false, error: 'Credit is required for every subject.' });
+          }
+        }
+      }
     }
 
     // Ensure unique profile ID
@@ -847,38 +864,41 @@ app.post(['/api/ai/extract-profile', '/ai/extract-profile'], async (req: Request
     const apiUrl = process.env.OPENROUTER_API_URL || process.env.AI_API_URL || 'https://openrouter.ai/api/v1/chat/completions';
 
     if (openrouterApiKey && openrouterApiKey.trim()) {
-      const systemPrompt = `You are a high-precision academic document vision extraction system.
-Analyze the user's document image or text and extract academic profile details and subject modules ONLY.
+      const systemPrompt = `You are a high-precision academic document vision & text extraction system.
+Analyze the user's document image, PDF, or text and extract academic profile details and subject modules ONLY.
 
 You MUST output ONLY a single raw JSON object matching this EXACT structure:
 {
-  "profileName": "string",
-  "university": "string",
-  "faculty": "string",
-  "department": "string",
-  "academicYear": "string",
-  "semester": "string",
-  "subjects": [
+  "profileName": "",
+  "university": "",
+  "faculty": "",
+  "department": "",
+  "academicYear": "",
+  "semesters": [
     {
-      "moduleNumber": "string",
-      "subjectName": "string",
-      "credit": 0
+      "name": "Semester 1",
+      "subjects": [
+        {
+          "moduleCode": "NANO01232",
+          "subjectName": "Fundamentals of Physics II",
+          "credit": 2
+        }
+      ]
     }
   ]
 }
 
 STRICT MANDATORY RULES:
-1. OUTPUT JSON ONLY. Do NOT wrap in markdown code blocks (\`\`\`json). Do NOT add any explanations, introductions, or trailing text before or after the JSON.
-2. PROFILE NAME: Only set profileName if an explicit profile name label is written on the document (e.g. "PROFILE NAME: ..."). Otherwise, set "profileName": "". Do NOT use university, faculty, department, semester, degree name, or subject name as profileName.
-3. SUBJECT EXTRACTION:
+1. OUTPUT JSON ONLY. Do NOT wrap in markdown code blocks. Do NOT add any explanations outside JSON.
+2. PROFILE NAME: Only set profileName if an explicit profile name label is written on the document (e.g. "PROFILE NAME: ..."). Otherwise set "profileName": "".
+3. SUBJECT EXTRACTION & LECTURER / TIMETABLE EXCLUSION:
    - Extract ONLY actual academic subjects / courses / modules.
-   - NEVER extract lecturer names, professor names, instructor names, staff names, contact details, email addresses, phone numbers, room numbers, building names, lab names, class times, dates, page numbers, decorative text, logos, or generic table headings as subjects.
+   - NEVER extract lecturer names (e.g. Dr., Prof., Mr., Ms., Doctor, Lecturer), staff names, contact details, email addresses, phone numbers, room numbers (e.g. N3-04, N3-01), building names, class times, days, (P), (T), practical session markers, or table headings (PROFILE, SUBJECTS, CALCULATIONS, LECTURER, TIMETABLE) as subjects or inside subject names.
 4. CREDIT EXTRACTION & PRIORITY:
-   - Priority 1: If explicit credit is stated in text, use that exact numeric credit.
-   - Priority 2: If explicit credit is missing, use the LAST DIGIT of the module number as the credit value.
-   - ZERO CREDIT IS VALID: 0 is a completely valid credit value.
-   - If credit cannot be determined, set "credit": null.
-5. PRESERVE MODULE NUMBERS: Preserve complete module numbers exactly as written.`;
+   - The LAST NUMERIC DIGIT of the module code represents the credit value (e.g. NANO01232 -> 2, NANO01261 -> 1, NANO01273 -> 3, ETCH1210 -> 0, PDEV1210 -> 0, NANO2112 -> 2, PDEV2110 -> 0).
+   - ZERO CREDIT IS VALID: 0 is a completely valid credit value. Never replace 0 with null, "Not Detected", or 1.
+   - "credit" MUST ALWAYS BE A NUMBER (e.g. 0, 1, 2, 3). Never string or "Not Detected".
+5. DE-DUPLICATE MODULES: If the same module code appears multiple times in a timetable or document (due to practicals, groups, or days), create ONLY ONE subject entry in the subjects list.`;
 
       let messagesPayload: any[] = [{ role: 'system', content: systemPrompt }];
 

@@ -262,11 +262,126 @@ function requireCloudClient(): SupabaseClient {
 
 async function writeCloudProfile(profileId: string, profileData: any, create: boolean): Promise<boolean> {
   const client = requireCloudClient();
-  const { error } = await client.rpc('save_gpa_profile', {
-    p_id: profileId, p_data: profileData, p_create: create
-  });
-  if (error) throw new Error('Unable to save cloud profile. Check the database migration and retry.');
-  return true;
+
+  if (create) {
+    const { error: pErr } = await client.from('profiles').insert({
+      id: profileId,
+      profile_name: (profileData.profile_name || '').trim(),
+      university: (profileData.university || '').trim(),
+      faculty: (profileData.faculty || '').trim(),
+      degree: (profileData.degree || '').trim(),
+      academic_year: (profileData.academic_year || '').trim(),
+      description: (profileData.description || '').trim(),
+      visibility: 'public',
+      passcode_hash: profileData.passcode_hash || ''
+    });
+
+    if (pErr) {
+      console.error('Server Supabase profile create error:', pErr);
+      throw new Error(`Unable to save cloud profile: ${pErr.message}`);
+    }
+
+    let semOrder = 1;
+    for (const sem of profileData.semesters || []) {
+      const { data: semData, error: sErr } = await client.from('semesters').insert({
+        profile_id: profileId,
+        semester_name: sem.semester_name || `Semester ${semOrder}`,
+        semester_order: semOrder
+      }).select('id').single();
+
+      if (sErr || !semData) {
+        console.error('Server Supabase semester create error:', sErr);
+        await client.from('profiles').delete().eq('id', profileId);
+        throw new Error(`Unable to save cloud profile semesters: ${sErr?.message || 'Unknown error'}`);
+      }
+
+      const semId = semData.id;
+      for (const sub of sem.subjects || []) {
+        const subCode = (sub as any).subject_code || (sub as any).module_number || '';
+        const subName = sub.subject_name ? sub.subject_name.trim() : subCode;
+        const creditVal = Number(sub.credit);
+
+        const { error: subErr } = await client.from('subjects').insert({
+          semester_id: semId,
+          subject_code: subCode,
+          subject_name: subName,
+          credit: creditVal
+        });
+
+        if (subErr) {
+          console.error('Server Supabase subject create error:', subErr);
+          await client.from('profiles').delete().eq('id', profileId);
+          throw new Error(`Unable to save cloud profile subjects: ${subErr.message}`);
+        }
+      }
+      semOrder++;
+    }
+
+    if (profileData.gradingScale && Array.isArray(profileData.gradingScale)) {
+      for (const gs of profileData.gradingScale) {
+        await client.from('grading_scales').insert({
+          profile_id: profileId,
+          grade: (gs.grade || '').trim(),
+          grade_point: Number(gs.grade_point || 0)
+        });
+      }
+    }
+    return true;
+  } else {
+    // Update existing profile
+    const { error: pErr } = await client.from('profiles').update({
+      profile_name: (profileData.profile_name || '').trim(),
+      university: (profileData.university || '').trim(),
+      faculty: (profileData.faculty || '').trim(),
+      degree: (profileData.degree || '').trim(),
+      academic_year: (profileData.academic_year || '').trim(),
+      description: (profileData.description || '').trim(),
+      visibility: 'public',
+      updated_at: new Date().toISOString()
+    }).eq('id', profileId);
+
+    if (pErr) throw new Error(`Unable to update cloud profile: ${pErr.message}`);
+
+    await client.from('semesters').delete().eq('profile_id', profileId);
+    await client.from('grading_scales').delete().eq('profile_id', profileId);
+
+    let semOrder = 1;
+    for (const sem of profileData.semesters || []) {
+      const { data: semData, error: sErr } = await client.from('semesters').insert({
+        profile_id: profileId,
+        semester_name: sem.semester_name || `Semester ${semOrder}`,
+        semester_order: semOrder
+      }).select('id').single();
+
+      if (!sErr && semData) {
+        const semId = semData.id;
+        for (const sub of sem.subjects || []) {
+          const subCode = (sub as any).subject_code || (sub as any).module_number || '';
+          const subName = sub.subject_name ? sub.subject_name.trim() : subCode;
+          const creditVal = Number(sub.credit);
+
+          await client.from('subjects').insert({
+            semester_id: semId,
+            subject_code: subCode,
+            subject_name: subName,
+            credit: creditVal
+          });
+        }
+      }
+      semOrder++;
+    }
+
+    if (profileData.gradingScale && Array.isArray(profileData.gradingScale)) {
+      for (const gs of profileData.gradingScale) {
+        await client.from('grading_scales').insert({
+          profile_id: profileId,
+          grade: (gs.grade || '').trim(),
+          grade_point: Number(gs.grade_point || 0)
+        });
+      }
+    }
+    return true;
+  }
 }
 
 export async function createSupabaseProfile(profileId: string, profileData: any): Promise<boolean> {

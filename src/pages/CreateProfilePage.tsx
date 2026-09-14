@@ -288,6 +288,12 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
       return;
     }
 
+    if (!passcode.trim()) {
+      setError('Owner passcode is required.');
+      setStep(4);
+      return;
+    }
+
     // Filter valid semesters and subjects (credit 0 is valid!)
     const cleanedSemesters = semesters.map((sem, idx) => ({
       ...sem,
@@ -553,7 +559,7 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
                 rows={2}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Enter optional description or degree programme details"
+                placeholder="Enter optional description or notes"
                 className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:outline-none placeholder-slate-400"
               />
             </div>
@@ -838,10 +844,14 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
             <div className="pt-2 text-xs text-slate-500 flex items-center space-x-4">
               <span>{semesters.length} Semesters</span>
               <span>
-                {semesters.reduce((acc, sem) => acc + sem.subjects.filter(s => s.subject_name.trim() || (s as any).subject_code).length, 0)} Total Subjects
+                {semesters.reduce((acc, sem) => acc + sem.subjects.filter(s => (s.subject_name.trim() || (s.subject_code && s.subject_code.trim())) && s.credit !== '' && s.credit !== null && s.credit !== undefined && !isNaN(Number(s.credit)) && Number(s.credit) >= 0).length, 0)} Total Subjects
               </span>
               <span>
-                {semesters.reduce((acc, sem) => acc + sem.subjects.reduce((sAcc, s) => sAcc + (Number(s.credit) >= 0 ? Number(s.credit) : 0), 0), 0)} Total Fixed Credits
+                {semesters.reduce((acc, sem) => acc + sem.subjects.reduce((sAcc, s) => {
+                  const hasText = Boolean(s.subject_name.trim() || (s.subject_code && s.subject_code.trim()));
+                  const isValidCredit = s.credit !== '' && s.credit !== null && s.credit !== undefined && !isNaN(Number(s.credit)) && Number(s.credit) >= 0;
+                  return sAcc + (hasText && isValidCredit ? Number(s.credit) : 0);
+                }, 0), 0)} Total Fixed Credits
               </span>
             </div>
           </div>
@@ -850,16 +860,16 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
           <div className="p-5 bg-slate-950 text-white rounded-2xl border border-slate-800 space-y-4">
             <div className="flex items-center space-x-2">
               <Lock className="w-5 h-5 text-indigo-400" />
-              <h3 className="font-bold text-sm">Set Owner Edit Passcode (Optional)</h3>
+              <h3 className="font-bold text-sm">Set Owner Edit Passcode <span className="text-indigo-400 font-extrabold">* (Required)</span></h3>
             </div>
             <p className="text-xs text-slate-400">
-              Set a passcode if you want to edit, manage, or delete this profile later. Viewers do NOT need this passcode to calculate their GPA.
+              Set a passcode to edit, manage, or delete this profile later. Viewers do NOT need this passcode to calculate their GPA.
             </p>
             <label htmlFor="create-profile-passcode" className="sr-only">Owner Passcode</label>
             <input
               id="create-profile-passcode"
               type="password"
-              placeholder="Enter owner passcode (optional)"
+              placeholder="Enter owner passcode"
               value={passcode}
               onChange={(e) => setPasscode(e.target.value)}
               className="w-full px-4 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder-slate-500"

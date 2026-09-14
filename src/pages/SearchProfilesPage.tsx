@@ -41,18 +41,15 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
   const [openPopover, setOpenPopover] = useState<PopoverType>(null);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
 
-  // Available Filter Options fetched from DB
   const [filterOptions, setFilterOptions] = useState<{
     universities: string[];
     faculties: string[];
     departments: string[];
-    degrees: string[];
     academicYears: string[];
   }>({
     universities: [],
     faculties: [],
     departments: [],
-    degrees: [],
     academicYears: []
   });
 

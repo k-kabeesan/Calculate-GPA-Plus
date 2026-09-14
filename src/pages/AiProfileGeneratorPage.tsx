@@ -14,7 +14,7 @@ import {
   AlertCircle,
   X
 } from 'lucide-react';
-import { extractAiProfile, extractAiProfileFromImage, createProfile } from '../services/dbService';
+import { extractAiProfile, extractAiProfileFromFile, createProfile } from '../services/dbService';
 import { formatErrorMessage } from '../utils/formatError';
 
 interface AiProfileGeneratorPageProps {
@@ -38,6 +38,7 @@ export const AiProfileGeneratorPage: React.FC<AiProfileGeneratorPageProps> = ({
 
   // Active Extracted Profile being reviewed
   const [reviewProfile, setReviewProfile] = useState<any | null>(null);
+  const [passcode, setPasscode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [createdProfileId, setCreatedProfileId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState(false);
@@ -63,16 +64,22 @@ PDEV2110 - Career Development II - 0 Credits`;
 
   const handleFileChange = (file: File | null) => {
     if (!file) return;
-    const validExtensions = ['jpg', 'jpeg', 'png', 'webp'];
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
-    if (!file.type.startsWith('image/') && !validExtensions.includes(ext)) {
-      setError('Please upload a valid image file (.jpg, .jpeg, .png, .webp).');
+    const isImage = file.type.startsWith('image/') || ['jpg', 'jpeg', 'png', 'webp'].includes(ext);
+    const isPdf = file.type === 'application/pdf' || ext === 'pdf';
+
+    if (!isImage && !isPdf) {
+      setError('Please upload a valid document or image file (.pdf, .jpg, .jpeg, .png, .webp).');
       return;
     }
     setError('');
     setSelectedFile(file);
-    const url = URL.createObjectURL(file);
-    setImagePreviewUrl(url);
+    if (isImage) {
+      const url = URL.createObjectURL(file);
+      setImagePreviewUrl(url);
+    } else {
+      setImagePreviewUrl(null);
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -107,24 +114,24 @@ PDEV2110 - Career Development II - 0 Credits`;
         extracted = await extractAiProfile(inputText.trim());
       } else {
         if (!selectedFile) {
-          setError('Please select or drag & drop an image file first.');
+          setError('Please select or drag & drop an image or PDF file first.');
           setLoading(false);
           return;
         }
-        setStatusMessage('Running OpenRouter Vision AI on your image document...');
-        extracted = await extractAiProfileFromImage(selectedFile, (progressPct) => {
+        setStatusMessage('Analyzing document with AI Vision & text extraction...');
+        extracted = await extractAiProfileFromFile(selectedFile, (progressPct: number) => {
           setOcrProgress(progressPct);
         });
       }
 
       if (!extracted || (!extracted.subjects || extracted.subjects.length === 0)) {
-        throw new Error('Could not identify academic subjects from the input. Please verify your text/image.');
+        throw new Error('Could not identify academic subjects from the input. Please verify your document or text.');
       }
 
       setReviewProfile(extracted);
     } catch (err: any) {
       console.error('Extraction error:', err);
-      setError(err.message || 'The AI response was incomplete. Please try again.');
+      setError(err.message || 'AI extraction failed. The server returned an invalid response. Please try again.');
     } finally {
       setLoading(false);
       setOcrProgress(0);
@@ -140,7 +147,13 @@ PDEV2110 - Career Development II - 0 Credits`;
     try {
       const pName = (reviewProfile.profileName || '').trim();
       if (!pName) {
-        setError('Profile Name is required. Please enter a valid profile name.');
+        setError('Profile name is required.');
+        setSubmitting(false);
+        return;
+      }
+
+      if (!passcode || !passcode.trim()) {
+        setError('Owner edit passcode is required.');
         setSubmitting(false);
         return;
       }
@@ -166,7 +179,7 @@ PDEV2110 - Career Development II - 0 Credits`;
       }
 
       if (missingCreditSubjectName) {
-        setError(`Credit is required for every subject or module ("${missingCreditSubjectName}" has no credit specified). Please enter all missing credits before creating the profile.`);
+        setError(`Credit is required for every subject ("${missingCreditSubjectName}" has no credit specified). Please enter all missing credits before creating the profile.`);
         setSubmitting(false);
         return;
       }
@@ -187,6 +200,7 @@ PDEV2110 - Career Development II - 0 Credits`;
         academic_year: yearName,
         description: 'Profile created using AI Profile Generator.',
         visibility: 'public',
+        passcode: passcode.trim(),
         semesters: [
           {
             semester_name: semName,
@@ -198,7 +212,7 @@ PDEV2110 - Career Development II - 0 Credits`;
 
       setCreatedProfileId(res.id);
     } catch (err: any) {
-      setError(formatErrorMessage(err, 'Failed to create profile. Please try again.'));
+      setError(formatErrorMessage(err, 'Unable to create profile. Please check your profile data and try again.'));
     } finally {
       setSubmitting(false);
     }
@@ -300,7 +314,7 @@ PDEV2110 - Career Development II - 0 Credits`;
                 }`}
               >
                 <ImageIcon className="w-4 h-4" />
-                <span>Upload Image</span>
+                <span>Upload Image / PDF</span>
               </button>
             </div>
 
@@ -330,13 +344,13 @@ PDEV2110 - Career Development II - 0 Credits`;
                 />
               </div>
             ) : (
-              /* Mode 2: Image Upload */
+              /* Mode 2: Image / PDF Upload */
               <div className="space-y-3">
                 <label className="text-xs font-extrabold text-slate-800 block">
-                  Upload Screenshot / Photo / Document
+                  Upload Screenshot / Photo / PDF Document
                 </label>
 
-                {!imagePreviewUrl ? (
+                {!imagePreviewUrl && !selectedFile ? (
                   <div
                     onDragOver={handleDragOver}
                     onDrop={handleDrop}
@@ -348,14 +362,14 @@ PDEV2110 - Career Development II - 0 Credits`;
                     </div>
                     <div className="space-y-1">
                       <p className="text-xs font-bold text-slate-800">
-                        Click to upload or drag & drop image
+                        Click to upload or drag & drop image or PDF
                       </p>
                       <p className="text-[11px] text-slate-500">
-                        Supports PNG, JPG, JPEG, WEBP screenshots & photos
+                        Supports PNG, JPG, JPEG, WEBP & PDF documents
                       </p>
                     </div>
                   </div>
-                ) : (
+                ) : imagePreviewUrl ? (
                   <div className="relative rounded-2xl border border-slate-200 overflow-hidden bg-slate-900 group">
                     <img
                       src={imagePreviewUrl}
@@ -377,12 +391,36 @@ PDEV2110 - Career Development II - 0 Credits`;
                       {selectedFile?.name} ({(selectedFile?.size ? (selectedFile.size / 1024).toFixed(0) : 0)} KB)
                     </div>
                   </div>
+                ) : (
+                  /* PDF File Selected Card */
+                  <div className="relative rounded-2xl border border-indigo-200 bg-indigo-50/50 p-6 flex items-center justify-between">
+                    <div className="flex items-center space-x-3 truncate">
+                      <div className="p-3 bg-indigo-600 text-white rounded-xl shadow-xs">
+                        <FileText className="w-6 h-6" />
+                      </div>
+                      <div className="truncate">
+                        <p className="text-xs font-extrabold text-slate-900 truncate">{selectedFile?.name}</p>
+                        <p className="text-[11px] font-semibold text-slate-500">PDF Document • {(selectedFile?.size ? (selectedFile.size / 1024).toFixed(0) : 0)} KB</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedFile(null);
+                        setImagePreviewUrl(null);
+                      }}
+                      className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg transition-colors ml-2 shrink-0"
+                      title="Remove file"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
                 )}
 
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/*,application/pdf"
                   onChange={(e) => e.target.files && handleFileChange(e.target.files[0])}
                   className="hidden"
                 />
@@ -594,6 +632,19 @@ PDEV2110 - Career Development II - 0 Credits`;
                       onChange={(e) => setReviewProfile({ ...reviewProfile, semester: e.target.value })}
                       placeholder="e.g. Semester 1"
                       className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs font-semibold bg-white"
+                    />
+                  </div>
+
+                  <div className="col-span-2 space-y-1 pt-1">
+                    <label className="text-xs font-bold text-slate-700 block">
+                      Owner Edit Passcode <span className="text-indigo-600 font-extrabold">* (Required)</span>
+                    </label>
+                    <input
+                      type="password"
+                      value={passcode}
+                      onChange={(e) => setPasscode(e.target.value)}
+                      placeholder="Enter passcode (required to edit/manage profile later)"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
                   </div>
                 </div>

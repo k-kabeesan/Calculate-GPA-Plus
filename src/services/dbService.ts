@@ -213,22 +213,31 @@ export async function safeFetchJson<T = any>(
   return data as T;
 }
 
-// Clean extracted subject names automatically
+// Clean extracted subject names automatically according to strict academic rules
 export function cleanSubjectTitle(rawTitle: string): string {
   if (!rawTitle) return '';
   let title = rawTitle
-    .replace(/\b(?:Room|Lab|LH|Venue|Hall|Building)\s*[-:\s]?\s*[A-Z0-9]+/gi, '')
+    // 1. Remove lecturer names with titles (Dr., Prof., Mr., Ms., Mrs., Professor, Doctor, Lecturer, Instructor)
+    .replace(/\b(?:by\s+)?(?:Dr\.|Prof\.|Professor|Doctor|Mr\.|Ms\.|Mrs\.|Lecturer|Instructor|Teacher)\s+[A-Z][a-zA-Z'\-]*(?:\s+[A-Z][a-zA-Z'\-]*)*/gi, '')
+    // 2. Remove room numbers and building/venue markers e.g. N3-04, N3-01, LH-1, Lab 2, Room 101
+    .replace(/\b[A-Z]{1,3}\s*[-–—:]\s*\d{1,4}\b/g, '')
+    .replace(/\b(?:Room|LH|Venue|Hall|Building|Campus|Classroom|Block)\s*[-:\s]?\s*[A-Z0-9]+\b/gi, '')
+    .replace(/\bLab\s*[-:\s]?\s*\d+\b/gi, '')
+    // 3. Remove timetable times, days, periods e.g. 8:00 AM, 12:30, Monday, Tuesday
     .replace(/\b\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?\b/g, '')
-    .replace(/\b(?:by\s+)?(?:Dr\.|Prof\.|Professor|Mr\.|Ms\.)\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*/gi, '')
+    .replace(/\b(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Mon|Tue|Wed|Thu|Fri|Sat|Sun)\b/gi, '')
+    // 4. Remove timetable indicators e.g. (P), (T), (E), (L), [P], [T], Practical, Tutorial, Lecture, Exam
+    .replace(/[\(\[\{]\s*(?:P|T|E|L|Practical|Tutorial|Lecture|Exam)\s*[\)\]\}]/gi, '')
+    .replace(/\b(?:Practical\s+Session|Tutorial\s+Session|Lecture\s+Session|Exam\s+Session|Group\s*\d+|Batch\s*\d+)\b/gi, '')
+    // 5. Remove explicit credit expressions e.g. 3.0 Credits, 3 cr, 2.0
     .replace(/\b\d+(?:\.\d+)?\s*(?:credits?|cr|pts?|credit hours?|c\.h\.)\b/gi, '')
     .replace(/[\(\[\{]\s*(?:credit[s]?|cr|pts?|units?)?\s*[\)\]\}]/gi, '')
+    // 6. Remove leading/trailing hyphens, dashes, colons, bullets, punctuation
     .replace(/^[\s\-–—:•*#|.]+/, '')
     .replace(/[\s\-–—:•*#|.]+$/, '')
     .replace(/\s+/g, ' ')
     .trim();
 
-  // Strip trailing hyphens, dashes, colons, extra spaces, or duplicate punctuation
-  title = title.replace(/[\s\-–—:;,\.]*$/, '').trim();
   return title;
 }
 
@@ -246,7 +255,6 @@ export async function fetchFilterOptions(): Promise<{
   universities: string[];
   faculties: string[];
   departments: string[];
-  degrees: string[];
   academicYears: string[];
 }> {
   try {
@@ -255,7 +263,6 @@ export async function fetchFilterOptions(): Promise<{
       universities: data.universities || [],
       faculties: data.faculties || [],
       departments: data.departments || [],
-      degrees: [],
       academicYears: data.academicYears || []
     };
   } catch {
@@ -272,7 +279,7 @@ export async function fetchFilterOptions(): Promise<{
           const faculties = Array.from(new Set(data.map(p => p.faculty).filter(Boolean))).sort();
           const departments = Array.from(new Set(data.map(p => p.department).filter(Boolean))).sort();
           const academicYears = Array.from(new Set(data.map(p => p.academic_year).filter(Boolean))).sort().reverse();
-          return { universities, faculties, departments, degrees: [], academicYears };
+          return { universities, faculties, departments, academicYears };
         }
       } catch {}
     }
@@ -282,7 +289,7 @@ export async function fetchFilterOptions(): Promise<{
     const faculties = Array.from(new Set(local.map((p: any) => p.faculty).filter(Boolean))).sort();
     const departments = Array.from(new Set(local.map((p: any) => p.department).filter(Boolean))).sort();
     const academicYears = Array.from(new Set(local.map((p: any) => p.academic_year).filter(Boolean))).sort().reverse();
-    return { universities, faculties, departments, degrees: [], academicYears };
+    return { universities, faculties, departments, academicYears };
   }
 }
 
@@ -318,7 +325,7 @@ export async function fetchPublicProfiles(paramsOrQuery: string | ProfileFilterP
         let query = clientSupabase
           .from('profiles')
           .select(`
-            id, profile_name, university, faculty, department, degree, academic_year, visibility, created_at,
+            id, profile_name, university, faculty, department, academic_year, visibility, created_at,
             semesters (
               id, semester_name, semester_order,
               subjects (
@@ -405,7 +412,7 @@ export async function fetchProfileById(profileId: string): Promise<Profile> {
       try {
         const { data: profile, error: pErr } = await clientSupabase
           .from('profiles')
-          .select('id, profile_name, university, faculty, department, academic_year, description, visibility, created_at, updated_at, passcode_hash, password_hash')
+          .select('id, profile_name, university, faculty, department, academic_year, description, visibility, created_at, updated_at, passcode_hash')
           .eq('id', cleanId)
           .single();
 
@@ -443,7 +450,7 @@ export async function fetchProfileById(profileId: string): Promise<Profile> {
             .eq('profile_id', cleanId)
             .order('grade_point', { ascending: false });
 
-          const storedHash = (profile as any).password_hash || (profile as any).passcode_hash || '';
+          const storedHash = (profile as any).passcode_hash || '';
 
           return {
             id: profile.id,
@@ -472,6 +479,245 @@ export async function fetchProfileById(profileId: string): Promise<Profile> {
   throw new Error('Profile not found. Please check the Profile ID or link.');
 }
 
+export function extractProfileFallbackClient(inputText: string): any {
+  const lines = inputText.split('\n').map(l => l.trim()).filter(Boolean);
+  
+  let profileName = '';
+  let university = '';
+  let faculty = '';
+  let department = '';
+  let academicYear = '';
+  let semester = '';
+
+  const subjects: Array<{ moduleNumber: string; subjectName: string; credit: number | null }> = [];
+  const seenCodes = new Set<string>();
+
+  for (const line of lines) {
+    if (/^(?:Dr\.|Prof\.|Professor|Doctor|Lecturer|Instructor|Teacher|Taught\s+by|Staff|Email|Phone|Tel|Contact|Room|Lab|LH|Venue|Building|Time|Day|Date|Page\s*\d+)/i.test(line)) {
+      continue;
+    }
+    if (/\b(?:@|http|www\.|AM|PM|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b/i.test(line) && !/^[A-Z]{2,6}\s*[-–—]?\s*\d{3,5}/i.test(line)) {
+      continue;
+    }
+
+    if (/^(?:PROFILE\s*NAME|PROFILE)\s*:\s*(.+)/i.test(line)) {
+      const match = line.match(/^(?:PROFILE\s*NAME|PROFILE)\s*:\s*(.+)/i);
+      if (match && match[1]) profileName = match[1].trim();
+      continue;
+    }
+    if (/^(?:UNIVERSITY|UNI|INSTITUTION)\s*:\s*(.+)/i.test(line)) {
+      const match = line.match(/^(?:UNIVERSITY|UNI|INSTITUTION)\s*:\s*(.+)/i);
+      if (match && match[1]) university = match[1].trim();
+      continue;
+    }
+    if (/^(?:FACULTY|SCHOOL|COLLEGE)\s*:\s*(.+)/i.test(line)) {
+      const match = line.match(/^(?:FACULTY|SCHOOL|COLLEGE)\s*:\s*(.+)/i);
+      if (match && match[1]) faculty = match[1].trim();
+      continue;
+    }
+    if (/^(?:DEPARTMENT|DEPT)\s*:\s*(.+)/i.test(line)) {
+      const match = line.match(/^(?:DEPARTMENT|DEPT)\s*:\s*(.+)/i);
+      if (match && match[1]) department = match[1].trim();
+      continue;
+    }
+    if (/^(?:ACADEMIC\s*YEAR|YEAR|BATCH)\s*:\s*(.+)/i.test(line)) {
+      const match = line.match(/^(?:ACADEMIC\s*YEAR|YEAR|BATCH)\s*:\s*(.+)/i);
+      if (match && match[1]) academicYear = match[1].trim();
+      continue;
+    }
+    if (/^(?:SEMESTER|TERM)\s*:\s*(.+)/i.test(line)) {
+      const match = line.match(/^(?:SEMESTER|TERM)\s*:\s*(.+)/i);
+      if (match && match[1]) semester = match[1].toLowerCase().startsWith('semester') ? match[1].trim() : `Semester ${match[1].trim()}`;
+      continue;
+    }
+
+    if (!university && /^(?:University|Institute|College|Academy)\b/i.test(line)) {
+      university = line.trim();
+      continue;
+    }
+    if (!faculty && /^(?:Faculty|School)\s+of\b/i.test(line)) {
+      faculty = line.trim();
+      continue;
+    }
+    if (!department && /^(?:Department|Dept\.)\s+of\b/i.test(line)) {
+      department = line.trim();
+      continue;
+    }
+    if (!academicYear && /\b(20\d{2}[-/]20\d{2}|Year\s+[1-5]|Academic\s+Year\s+\d+)\b/i.test(line)) {
+      const match = line.match(/\b(20\d{2}[-/]20\d{2}|Year\s+[1-5]|Academic\s+Year\s+\d+)\b/i);
+      if (match) academicYear = match[1].trim();
+      continue;
+    }
+    if (!semester && /\b(Semester\s+[1-8]|Sem\s+[1-8]|Term\s+[1-4])\b/i.test(line)) {
+      const match = line.match(/\b(Semester\s+[1-8]|Sem\s+[1-8]|Term\s+[1-4])\b/i);
+      if (match) semester = match[1].trim();
+      continue;
+    }
+
+    if (/^(?:SUBJECTS|MODULES|COURSES|INSTRUCTIONS?|NOTES?|TIMETABLE|RESULTS?|GRADES?|SYLLABUS|COURSE OUTLINE|MODULE LIST|SL\.\s*NO|SR\.\s*NO|MODULE CODE|SUBJECT NAME|CREDITS?)\s*:?$/i.test(line)) {
+      continue;
+    }
+
+    const codeMatch = line.match(/^([A-Z]{2,6}\s*[-–—]?\s*\d{3,5}[A-Z]?)\b\s*[-–—:|]?\s*(.*)$/i);
+    let moduleNumber = '';
+    let remainingLine = '';
+
+    if (codeMatch) {
+      moduleNumber = codeMatch[1].replace(/\s+/g, '').toUpperCase();
+      remainingLine = codeMatch[2].trim();
+    } else {
+      const inlineCodeMatch = line.match(/\b([A-Z]{2,6}\s*[-–—]?\s*\d{3,5}[A-Z]?)\b/i);
+      if (inlineCodeMatch) {
+        moduleNumber = inlineCodeMatch[1].replace(/\s+/g, '').toUpperCase();
+        remainingLine = line.replace(inlineCodeMatch[0], '').replace(/^[-–—:|]+/, '').trim();
+      }
+    }
+
+    if (moduleNumber) {
+      if (seenCodes.has(moduleNumber)) continue; // Requirement 8: De-duplicate duplicate module entries
+    }
+
+    if (moduleNumber || (remainingLine && !/^(?:University|Faculty|Department|Semester|Academic Year|Grade|Point|Marks|Total|GPA|CGPA|Credit|Lecturer|Dr\.|Prof\.)/i.test(line))) {
+      let credit: number | null = null;
+      let subjectTitle = remainingLine || line;
+
+      // Requirement 3: Deterministic credit extraction from final numeric digit of module code
+      if (moduleNumber) {
+        const digits = moduleNumber.match(/\d/g);
+        if (digits && digits.length > 0) {
+          const lastDigitVal = parseInt(digits[digits.length - 1], 10);
+          if (!isNaN(lastDigitVal) && lastDigitVal >= 0 && lastDigitVal <= 9) {
+            credit = lastDigitVal;
+          }
+        }
+      }
+
+      if (credit === null) {
+        const explicitCreditMatch = subjectTitle.match(/(?:^|[-–—:|,\s])(\d+(?:\.\d+)?)\s*(?:credits?|cr|pts?|credit hours?|c\.h\.)(?:$|[\)\s])/i);
+        if (explicitCreditMatch && explicitCreditMatch[1] !== undefined) {
+          const val = parseFloat(explicitCreditMatch[1]);
+          if (!isNaN(val) && val >= 0 && val <= 12) credit = val;
+        }
+      }
+
+      subjectTitle = cleanSubjectTitle(subjectTitle);
+
+      if (!subjectTitle && moduleNumber) {
+        subjectTitle = moduleNumber;
+      }
+
+      if (subjectTitle || moduleNumber) {
+        if (moduleNumber) seenCodes.add(moduleNumber);
+        subjects.push({
+          moduleNumber,
+          subjectName: subjectTitle,
+          credit
+        });
+      }
+    }
+  }
+
+  return {
+    profileName,
+    university,
+    faculty,
+    department,
+    academicYear,
+    semester,
+    subjects
+  };
+}
+
+export function normalizeExtractedProfileClient(raw: any) {
+  if (!raw || typeof raw !== 'object') return extractProfileFallbackClient('');
+  let profileName = raw.profileName || raw.profile_name || '';
+  if (
+    profileName === 'Not detected' ||
+    /Academic Profile/i.test(profileName) ||
+    /Semester\s*\d+/i.test(profileName) ||
+    /University/i.test(profileName) ||
+    /Faculty/i.test(profileName) ||
+    /Department/i.test(profileName) ||
+    /Bachelor|BSc|MSc|Master|Degree|Diploma/i.test(profileName)
+  ) {
+    profileName = '';
+  }
+
+  let university = raw.university === 'Not detected' ? '' : (raw.university || '');
+  let faculty = raw.faculty === 'Not detected' ? '' : (raw.faculty || '');
+  let department = raw.department === 'Not detected' ? '' : (raw.department || '');
+  let academicYear = raw.academicYear || raw.academic_year || '';
+  if (academicYear === 'Not detected') academicYear = '';
+  let semester = raw.semester || '';
+  if (semester === 'Not detected') semester = '';
+
+  interface ExtractedSubject {
+    moduleNumber: string;
+    subjectName: string;
+    credit: number | null;
+  }
+
+  let rawSubjects: any[] = [];
+  if (Array.isArray(raw.subjects)) {
+    rawSubjects = raw.subjects;
+  } else if (Array.isArray(raw.semesters)) {
+    raw.semesters.forEach((sem: any) => {
+      if (!semester && sem.name) semester = sem.name;
+      if (Array.isArray(sem.subjects)) rawSubjects.push(...sem.subjects);
+    });
+  }
+
+  const subjects: ExtractedSubject[] = [];
+  const seenCodes = new Set<string>();
+
+  for (const s of rawSubjects) {
+    const mod = (s.moduleNumber || s.moduleCode || s.subject_code || s.code || '').replace(/\s+/g, '').toUpperCase();
+    if (!mod && !s.subjectName && !s.subject_name && !s.name) continue;
+
+    // Requirement 8: De-duplicate duplicate module entries
+    if (mod && seenCodes.has(mod)) continue;
+
+    let name = cleanSubjectTitle((s.subjectName || s.subject_name || s.name || mod || '').trim());
+    if (name === 'Not detected' || /^(?:PROFILE|SUBJECTS|TIMETABLE|LECTURER|CALCULATIONS)$/i.test(name)) {
+      name = mod;
+    }
+
+    let cr: number | null = null;
+    // Requirement 3: Deterministic credit extraction from final numeric digit of module code
+    if (mod) {
+      const digits = mod.match(/\d/g);
+      if (digits && digits.length > 0) {
+        const lastDigitVal = parseInt(digits[digits.length - 1], 10);
+        if (!isNaN(lastDigitVal) && lastDigitVal >= 0 && lastDigitVal <= 9) {
+          cr = lastDigitVal; // Requirement 2 & 3: 0 is valid, 1-9 is valid
+        }
+      }
+    }
+
+    if (cr === null && s.credit !== null && s.credit !== undefined && s.credit !== '' && !isNaN(Number(s.credit))) {
+      cr = Number(s.credit);
+    }
+
+    if (mod) seenCodes.add(mod);
+
+    subjects.push({
+      moduleNumber: mod,
+      subjectName: name || mod,
+      credit: cr
+    });
+  }
+
+  return {
+    profileName,
+    university,
+    faculty,
+    department,
+    academicYear,
+    semester,
+    subjects
+  };
+}
+
 export async function createProfile(profileData: {
   profile_name: string;
   university?: string;
@@ -485,9 +731,35 @@ export async function createProfile(profileData: {
   semesters: Semester[];
   gradingScale?: GradeOption[];
 }): Promise<{ id: string }> {
-  // Always force visibility to 'public' as per Requirement 1
+  // Requirement 2: Profile Name is required
+  if (!profileData.profile_name || !profileData.profile_name.trim()) {
+    throw new Error('Profile name is required.');
+  }
+
+  // Requirement 3: Owner passcode is required
+  if (!profileData.passcode || !profileData.passcode.trim()) {
+    throw new Error('Owner edit passcode is required.');
+  }
+
+  // Requirement 6: Validate every subject has valid credit
+  for (const sem of profileData.semesters || []) {
+    for (const sub of sem.subjects || []) {
+      const code = ((sub as any).subject_code || (sub as any).module_number || '').trim();
+      const name = (sub.subject_name || '').trim();
+      if (code || name) {
+        const isCreditMissing = (sub.credit as any) === '' || sub.credit === null || sub.credit === undefined || isNaN(Number(sub.credit)) || Number(sub.credit) < 0;
+        if (isCreditMissing) {
+          throw new Error('Credit is required for every subject.');
+        }
+      }
+    }
+  }
+
+  // Always force visibility to 'public' as per Requirement 9
   const payload = {
     ...profileData,
+    profile_name: profileData.profile_name.trim(),
+    passcode: profileData.passcode.trim(),
     visibility: 'public' as const
   };
 
@@ -514,74 +786,107 @@ export async function createProfile(profileData: {
       });
       return { id: data.id };
     }
-  } catch (err) {
+  } catch (err: any) {
     if (clientSupabase) {
       try {
         const profileId = generateProfileId();
-        let passHash = '';
-        if (payload.passcode) {
-          const encoder = new TextEncoder();
-          const dataBuf = encoder.encode(payload.passcode);
-          const hashBuf = await crypto.subtle.digest('SHA-256', dataBuf);
-          const hashArray = Array.from(new Uint8Array(hashBuf));
-          passHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        }
+        
+        // Hash passcode using SHA-256
+        const encoder = new TextEncoder();
+        const dataBuf = encoder.encode(payload.passcode);
+        const hashBuf = await crypto.subtle.digest('SHA-256', dataBuf);
+        const hashArray = Array.from(new Uint8Array(hashBuf));
+        const passHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
+        // Direct table insert with exact existing columns in Supabase
         const { error: pErr } = await clientSupabase.from('profiles').insert({
           id: profileId,
-          profile_id: profileId,
-          profile_name: payload.profile_name.trim(),
+          profile_name: payload.profile_name,
           university: (payload.university || '').trim(),
           faculty: (payload.faculty || '').trim(),
-          department: (payload.department || '').trim(),
-          degree: '',
+          degree: (payload.degree || '').trim(),
           academic_year: (payload.academic_year || '').trim(),
           description: (payload.description || '').trim(),
           visibility: 'public',
-          passcode_hash: passHash,
-          password_hash: passHash
+          passcode_hash: passHash
         });
 
-        if (!pErr) {
-          let semOrder = 1;
-          for (const sem of payload.semesters || []) {
-            const { data: semData, error: sErr } = await clientSupabase.from('semesters').insert({
-              profile_id: profileId,
-              semester_name: sem.semester_name || `Semester ${semOrder}`,
-              semester_order: semOrder
-            }).select('id').single();
+        if (pErr) {
+          console.error('Supabase error inserting profile:', {
+            code: pErr.code,
+            message: pErr.message,
+            details: pErr.details,
+            hint: pErr.hint
+          });
+          const formatted = formatErrorMessage(pErr, 'Unable to create profile. Please check your profile data and try again.');
+          throw new Error(formatted);
+        }
 
-            if (!sErr && semData) {
-              const semId = semData.id;
-              for (const sub of sem.subjects || []) {
-                if (sub.subject_name && Number(sub.credit) >= 0) {
-                  await clientSupabase.from('subjects').insert({
-                    semester_id: semId,
-                    subject_code: (sub as any).subject_code || '',
-                    module_number: (sub as any).subject_code || '',
-                    subject_name: sub.subject_name.trim(),
-                    credit: Number(sub.credit)
-                  });
-                }
-              }
-            }
-            semOrder++;
+        let semOrder = 1;
+        for (const sem of payload.semesters || []) {
+          const { data: semData, error: sErr } = await clientSupabase.from('semesters').insert({
+            profile_id: profileId,
+            semester_name: sem.semester_name || `Semester ${semOrder}`,
+            semester_order: semOrder
+          }).select('id').single();
+
+          if (sErr || !semData) {
+            console.error('Supabase error inserting semester:', {
+              code: sErr?.code,
+              message: sErr?.message,
+              details: sErr?.details,
+              hint: sErr?.hint
+            });
+            // Cleanup orphan profile
+            await clientSupabase.from('profiles').delete().eq('id', profileId);
+            const formatted = formatErrorMessage(sErr, 'Unable to save semesters for profile.');
+            throw new Error(formatted);
           }
 
-          saveLocalProfile({
-            ...payload,
-            id: profileId,
-            created_at: new Date().toISOString()
-          });
+          const semId = semData.id;
+          for (const sub of sem.subjects || []) {
+            const subCode = (sub as any).subject_code || (sub as any).module_number || '';
+            const subName = sub.subject_name ? sub.subject_name.trim() : subCode;
+            const creditVal = Number(sub.credit);
 
-          return { id: profileId };
+            const { error: subErr } = await clientSupabase.from('subjects').insert({
+              semester_id: semId,
+              subject_code: subCode,
+              subject_name: subName,
+              credit: creditVal
+            });
+
+            if (subErr) {
+              console.error('Supabase error inserting subject:', {
+                code: subErr.code,
+                message: subErr.message,
+                details: subErr.details,
+                hint: subErr.hint
+              });
+              // Cleanup orphan profile
+              await clientSupabase.from('profiles').delete().eq('id', profileId);
+              const formatted = formatErrorMessage(subErr, 'Unable to save subjects for profile.');
+              throw new Error(formatted);
+            }
+          }
+          semOrder++;
         }
-      } catch {}
+
+        saveLocalProfile({
+          ...payload,
+          id: profileId,
+          created_at: new Date().toISOString()
+        });
+
+        return { id: profileId };
+      } catch (clientErr: any) {
+        throw new Error(formatErrorMessage(clientErr, 'Unable to create profile. Please check your profile data and try again.'));
+      }
     }
-    throw err;
+    throw new Error(formatErrorMessage(err, 'Unable to create profile. Please check your profile data and try again.'));
   }
 
-  throw new Error('Failed to create profile.');
+  throw new Error('Unable to create profile. Please check your profile data and try again.');
 }
 
 export async function verifyOwnerPasscode(profileId: string, passcode: string): Promise<boolean> {
@@ -669,243 +974,7 @@ export async function deleteProfile(profileId: string, passcode: string): Promis
   return true;
 }
 
-export function extractProfileFallbackClient(inputText: string): any {
-  const lines = inputText.split('\n').map(l => l.trim()).filter(Boolean);
-  
-  let profileName = '';
-  let university = '';
-  let faculty = '';
-  let department = '';
-  let academicYear = '';
-  let semester = '';
 
-  const subjects: Array<{ moduleNumber: string; subjectName: string; credit: number | null }> = [];
-
-  for (const line of lines) {
-    if (/^(?:Dr\.|Prof\.|Professor|Doctor|Lecturer|Instructor|Teacher|Taught\s+by|Staff|Email|Phone|Tel|Contact|Room|Lab|LH|Venue|Building|Time|Day|Date|Page\s*\d+)/i.test(line)) {
-      continue;
-    }
-    if (/\b(?:@|http|www\.|AM|PM|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b/i.test(line) && !/^[A-Z]{2,6}\s*[-–—]?\s*\d{3,5}/i.test(line)) {
-      continue;
-    }
-
-    if (/^(?:PROFILE\s*NAME|PROFILE)\s*:\s*(.+)/i.test(line)) {
-      const match = line.match(/^(?:PROFILE\s*NAME|PROFILE)\s*:\s*(.+)/i);
-      if (match && match[1]) profileName = match[1].trim();
-      continue;
-    }
-    if (/^(?:UNIVERSITY|UNI|INSTITUTION)\s*:\s*(.+)/i.test(line)) {
-      const match = line.match(/^(?:UNIVERSITY|UNI|INSTITUTION)\s*:\s*(.+)/i);
-      if (match && match[1]) university = match[1].trim();
-      continue;
-    }
-    if (/^(?:FACULTY|SCHOOL|COLLEGE)\s*:\s*(.+)/i.test(line)) {
-      const match = line.match(/^(?:FACULTY|SCHOOL|COLLEGE)\s*:\s*(.+)/i);
-      if (match && match[1]) faculty = match[1].trim();
-      continue;
-    }
-    if (/^(?:DEPARTMENT|DEPT)\s*:\s*(.+)/i.test(line)) {
-      const match = line.match(/^(?:DEPARTMENT|DEPT)\s*:\s*(.+)/i);
-      if (match && match[1]) department = match[1].trim();
-      continue;
-    }
-    if (/^(?:ACADEMIC\s*YEAR|YEAR|BATCH)\s*:\s*(.+)/i.test(line)) {
-      const match = line.match(/^(?:ACADEMIC\s*YEAR|YEAR|BATCH)\s*:\s*(.+)/i);
-      if (match && match[1]) academicYear = match[1].trim();
-      continue;
-    }
-    if (/^(?:SEMESTER|TERM)\s*:\s*(.+)/i.test(line)) {
-      const match = line.match(/^(?:SEMESTER|TERM)\s*:\s*(.+)/i);
-      if (match && match[1]) semester = match[1].toLowerCase().startsWith('semester') ? match[1].trim() : `Semester ${match[1].trim()}`;
-      continue;
-    }
-
-    if (!university && /^(?:University|Institute|College|Academy)\b/i.test(line)) {
-      university = line.trim();
-      continue;
-    }
-    if (!faculty && /^(?:Faculty|School)\s+of\b/i.test(line)) {
-      faculty = line.trim();
-      continue;
-    }
-    if (!department && /^(?:Department|Dept\.)\s+of\b/i.test(line)) {
-      department = line.trim();
-      continue;
-    }
-    if (!academicYear && /\b(20\d{2}[-/]20\d{2}|Year\s+[1-5]|Academic\s+Year\s+\d+)\b/i.test(line)) {
-      const match = line.match(/\b(20\d{2}[-/]20\d{2}|Year\s+[1-5]|Academic\s+Year\s+\d+)\b/i);
-      if (match) academicYear = match[1].trim();
-      continue;
-    }
-    if (!semester && /\b(Semester\s+[1-8]|Sem\s+[1-8]|Term\s+[1-4])\b/i.test(line)) {
-      const match = line.match(/\b(Semester\s+[1-8]|Sem\s+[1-8]|Term\s+[1-4])\b/i);
-      if (match) semester = match[1].trim();
-      continue;
-    }
-
-    if (/^(?:SUBJECTS|MODULES|COURSES|INSTRUCTIONS?|NOTES?|TIMETABLE|RESULTS?|GRADES?|SYLLABUS|COURSE OUTLINE|MODULE LIST|SL\.\s*NO|SR\.\s*NO|MODULE CODE|SUBJECT NAME|CREDITS?)\s*:?$/i.test(line)) {
-      continue;
-    }
-
-    const codeMatch = line.match(/^([A-Z]{2,6}\s*[-–—]?\s*\d{3,5}[A-Z]?)\b\s*[-–—:|]?\s*(.*)$/i);
-    let moduleNumber = '';
-    let remainingLine = '';
-
-    if (codeMatch) {
-      moduleNumber = codeMatch[1].replace(/\s+/g, '').toUpperCase();
-      remainingLine = codeMatch[2].trim();
-    } else {
-      const inlineCodeMatch = line.match(/\b([A-Z]{2,6}\s*[-–—]?\s*\d{3,5}[A-Z]?)\b/i);
-      if (inlineCodeMatch) {
-        moduleNumber = inlineCodeMatch[1].replace(/\s+/g, '').toUpperCase();
-        remainingLine = line.replace(inlineCodeMatch[0], '').replace(/^[-–—:|]+/, '').trim();
-      }
-    }
-
-    if (moduleNumber || (remainingLine && !/^(?:University|Faculty|Department|Semester|Academic Year|Grade|Point|Marks|Total|GPA|CGPA|Credit|Lecturer|Dr\.|Prof\.)/i.test(line))) {
-      let credit: number | null = null;
-      let subjectTitle = remainingLine || line;
-
-      // Parse explicit credits before cleaning removes them.
-      const explicitCreditMatch = subjectTitle.match(/(?:^|[-–—:|,\s])(\d+(?:\.\d+)?)\s*(?:credits?|cr|pts?|credit hours?|c\.h\.)(?:$|[\)\s])/i);
-      const trailingCreditMatch = subjectTitle.match(/[-–—:|]?\s*(\d+(?:\.\d+)?)\s*(?:credits?|cr|pts?)?\s*$/i);
-
-      if (explicitCreditMatch && explicitCreditMatch[1] !== undefined) {
-        const val = parseFloat(explicitCreditMatch[1]);
-        if (!isNaN(val) && val >= 0 && val <= 12) {
-          credit = val;
-        }
-      } else if (trailingCreditMatch && trailingCreditMatch[1] !== undefined && /(?:credits?|cr|pts?)/i.test(line)) {
-        const val = parseFloat(trailingCreditMatch[1]);
-        if (!isNaN(val) && val >= 0 && val <= 12) {
-          credit = val;
-          subjectTitle = subjectTitle.substring(0, trailingCreditMatch.index).trim();
-        }
-      }
-
-      if (credit === null && moduleNumber) {
-        const digits = moduleNumber.match(/\d/g);
-        if (digits && digits.length > 0) {
-          const lastDigitVal = parseInt(digits[digits.length - 1], 10);
-          if (!isNaN(lastDigitVal)) {
-            credit = lastDigitVal;
-          }
-        }
-      }
-
-      subjectTitle = cleanSubjectTitle(subjectTitle);
-
-      if (!subjectTitle && moduleNumber) {
-        subjectTitle = moduleNumber;
-      }
-
-      if (subjectTitle || moduleNumber) {
-        subjects.push({
-          moduleNumber,
-          subjectName: subjectTitle,
-          credit
-        });
-      }
-    }
-  }
-
-  return {
-    profileName,
-    university,
-    faculty,
-    department,
-    academicYear,
-    semester,
-    subjects
-  };
-}
-
-export function normalizeExtractedProfileClient(raw: any) {
-  if (!raw || typeof raw !== 'object') return extractProfileFallbackClient('');
-  let profileName = raw.profileName || raw.profile_name || '';
-  if (
-    profileName === 'Not detected' ||
-    /Academic Profile/i.test(profileName) ||
-    /Semester\s*\d+/i.test(profileName) ||
-    /University/i.test(profileName) ||
-    /Faculty/i.test(profileName) ||
-    /Department/i.test(profileName) ||
-    /Bachelor|BSc|MSc|Master|Degree|Diploma/i.test(profileName)
-  ) {
-    profileName = '';
-  }
-
-  let university = raw.university === 'Not detected' ? '' : (raw.university || '');
-  let faculty = raw.faculty === 'Not detected' ? '' : (raw.faculty || '');
-  let department = raw.department === 'Not detected' ? '' : (raw.department || '');
-  let academicYear = raw.academicYear || raw.academic_year || '';
-  if (academicYear === 'Not detected') academicYear = '';
-  let semester = raw.semester || '';
-  if (semester === 'Not detected') semester = '';
-
-interface ExtractedSubject {
-  moduleNumber: string;
-  subjectName: string;
-  credit: number | null;
-}
-
-  let subjects: ExtractedSubject[] = [];
-
-  const extractSubjectObj = (s: any): ExtractedSubject => {
-    const mod = (s.moduleNumber || s.subject_code || s.code || '').trim();
-    let name = (s.subjectName || s.subject_name || s.name || mod || '').trim();
-
-    name = name
-      .replace(/\b(?:by\s+)?(?:Dr\.|Prof\.|Professor|Mr\.|Ms\.)\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*/gi, '')
-      .replace(/\b(?:Room|Lab|LH|Venue|Hall)\s*[-:\s]?\s*[A-Z0-9]+/gi, '')
-      .trim();
-
-    let cr: number | null = null;
-    if (s.credit !== null && s.credit !== undefined && s.credit !== '' && !isNaN(Number(s.credit))) {
-      cr = Number(s.credit);
-    } else if (mod) {
-      const digits = mod.match(/\d/g);
-      if (digits && digits.length > 0) {
-        const lastDigitVal = parseInt(digits[digits.length - 1], 10);
-        if (!isNaN(lastDigitVal)) cr = lastDigitVal;
-      }
-    }
-
-    return {
-      moduleNumber: mod === 'Not detected' ? '' : mod,
-      subjectName: name === 'Not detected' ? '' : name,
-      credit: cr
-    };
-  };
-
-  if (Array.isArray(raw.subjects)) {
-    subjects = raw.subjects.map(extractSubjectObj).filter((s: ExtractedSubject) => s.moduleNumber || s.subjectName);
-  } else if (Array.isArray(raw.semesters)) {
-    raw.semesters.forEach((sem: any) => {
-      if (!semester && sem.semester_name) {
-        semester = sem.semester_name;
-      }
-      if (Array.isArray(sem.subjects)) {
-        sem.subjects.forEach((s: any) => {
-          const extractedSub = extractSubjectObj(s);
-          if (extractedSub.moduleNumber || extractedSub.subjectName) {
-            subjects.push(extractedSub);
-          }
-        });
-      }
-    });
-  }
-
-  return {
-    profileName,
-    university,
-    faculty,
-    department,
-    academicYear,
-    semester,
-    subjects
-  };
-}
 
 export async function safeFetchJsonResponse(res: Response): Promise<any> {
   let text = '';
@@ -973,13 +1042,51 @@ export async function extractAiProfile(text: string): Promise<any> {
   throw new Error('The AI response was incomplete. Please try again.');
 }
 
-export async function extractAiProfileFromImage(
-  imageFile: File,
+export async function extractTextFromPdfFile(file: File): Promise<string> {
+  try {
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    const decoder = new TextDecoder('latin1');
+    const pdfText = decoder.decode(bytes);
+
+    // Extract text strings inside brackets e.g. (Text) Tj or (Text) TJ
+    const TjMatches = pdfText.match(/\(([^()]+)\)\s*Tj/g) || [];
+    const TJMatches = pdfText.match(/\[([^\]]+)\]\s*TJ/g) || [];
+
+    let extractedLines: string[] = [];
+
+    for (const m of TjMatches) {
+      const clean = m.replace(/^\(/, '').replace(/\)\s*Tj$/, '').trim();
+      if (clean && clean.length > 1) extractedLines.push(clean);
+    }
+
+    for (const m of TJMatches) {
+      const parts = m.match(/\(([^()]+)\)/g) || [];
+      const clean = parts.map(p => p.replace(/[()]/g, '')).join(' ').trim();
+      if (clean && clean.length > 1) extractedLines.push(clean);
+    }
+
+    if (extractedLines.length === 0) {
+      const asciiLines = pdfText.match(/[A-Z0-9\s.,\-:()/]{4,}/gi) || [];
+      extractedLines = asciiLines.map(l => l.trim()).filter(l => l.length > 3);
+    }
+
+    return extractedLines.join('\n');
+  } catch {
+    throw new Error('Unable to read PDF file content. Please try pasting the course text directly.');
+  }
+}
+
+export async function extractAiProfileFromFile(
+  file: File,
   onProgress?: (progressPct: number) => void
 ): Promise<any> {
-  const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-  if (imageFile.type && !validTypes.includes(imageFile.type.toLowerCase())) {
-    throw new Error('Invalid image format. Please upload a JPG, JPEG, PNG, or WEBP image.');
+  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+  const validImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+  const isImage = file.type ? validImageTypes.includes(file.type.toLowerCase()) : false;
+
+  if (!isPdf && !isImage) {
+    throw new Error('Invalid file format. Please upload a PDF document or a JPG, JPEG, PNG, or WEBP image.');
   }
 
   try {
@@ -988,7 +1095,7 @@ export async function extractAiProfileFromImage(
       reader.onload = () => resolve(reader.result as string);
       reader.onerror = (e) => reject(e);
     });
-    reader.readAsDataURL(imageFile);
+    reader.readAsDataURL(file);
     const base64Data = await base64Promise;
 
     onProgress?.(20);
@@ -1016,10 +1123,22 @@ export async function extractAiProfileFromImage(
       }
     }
   } catch (err: any) {
-    if (err.message && (err.message.includes('Unable to analyze') || err.message.includes('Invalid image'))) {
+    if (err.message && (err.message.includes('Unable to analyze') || err.message.includes('Invalid file'))) {
       throw err;
     }
-    console.warn('Backend AI vision endpoint unavailable or failed, continuing to client-side OCR:', err);
+    console.warn('Backend AI vision endpoint unavailable or failed, continuing to client-side fallback:', err);
+  }
+
+  if (isPdf) {
+    onProgress?.(50);
+    const pdfText = await extractTextFromPdfFile(file);
+    onProgress?.(90);
+    if (pdfText && pdfText.trim()) {
+      const profile = await extractAiProfile(pdfText);
+      onProgress?.(100);
+      return profile;
+    }
+    throw new Error('Unable to analyze the PDF file. Please try pasting the course text directly.');
   }
 
   onProgress?.(30);
@@ -1034,7 +1153,7 @@ export async function extractAiProfileFromImage(
       }
     });
 
-    const { data: { text } } = await worker.recognize(imageFile);
+    const { data: { text } } = await worker.recognize(file);
     await worker.terminate();
 
     onProgress?.(95);
@@ -1048,7 +1167,10 @@ export async function extractAiProfileFromImage(
     return profile;
   } catch (err: any) {
     console.error('Vision OCR processing error:', err);
-    throw new Error('Unable to analyze the image. Please try again.');
+    throw new Error('Unable to analyze the file. Please try again.');
   }
 }
+
+export const extractAiProfileFromImage = extractAiProfileFromFile;
+
 
