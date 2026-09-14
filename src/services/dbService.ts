@@ -369,7 +369,7 @@ export async function fetchPublicProfiles(paramsOrQuery: string | ProfileFilterP
     if (localProfiles.length > 0) {
       return localProfiles;
     }
-    throw err;
+    return [];
   }
 }
 
