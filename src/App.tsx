@@ -1,18 +1,22 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
 import { HomePage } from './pages/HomePage';
-import { NormalCalculatorPage } from './pages/NormalCalculatorPage';
-import { CreateProfilePage } from './pages/CreateProfilePage';
-import { AiProfileGeneratorPage } from './pages/AiProfileGeneratorPage';
-import { ProfileViewerPage } from './pages/ProfileViewerPage';
-import { ProfileManagePage } from './pages/ProfileManagePage';
-import { SearchProfilesPage } from './pages/SearchProfilesPage';
-import { AboutPage } from './pages/AboutPage';
-import { PrivacyPage } from './pages/PrivacyPage';
+const NormalCalculatorPage = lazy(() => import('./pages/NormalCalculatorPage').then(module => ({ default: module.NormalCalculatorPage })));
+const CreateProfilePage = lazy(() => import('./pages/CreateProfilePage').then(module => ({ default: module.CreateProfilePage })));
+const AiProfileGeneratorPage = lazy(() => import('./pages/AiProfileGeneratorPage').then(module => ({ default: module.AiProfileGeneratorPage })));
+const ProfileViewerPage = lazy(() => import('./pages/ProfileViewerPage').then(module => ({ default: module.ProfileViewerPage })));
+const ProfileManagePage = lazy(() => import('./pages/ProfileManagePage').then(module => ({ default: module.ProfileManagePage })));
+const SearchProfilesPage = lazy(() => import('./pages/SearchProfilesPage').then(module => ({ default: module.SearchProfilesPage })));
+const AboutPage = lazy(() => import('./pages/AboutPage').then(module => ({ default: module.AboutPage })));
+const PrivacyPage = lazy(() => import('./pages/PrivacyPage').then(module => ({ default: module.PrivacyPage })));
 import type { Subject } from './types';
 
 export function App() {
+  return <Suspense fallback={<div role="status" className="p-8 text-center">Loading?</div>}><AppContent /></Suspense>;
+}
+
+function AppContent() {
   const [activeTab, setActiveTab] = useState<'home' | 'normal' | 'create' | 'ai' | 'search' | 'viewer' | 'manage' | 'about' | 'privacy'>('home');
   const [selectedProfileId, setSelectedProfileId] = useState<string>('');
 
