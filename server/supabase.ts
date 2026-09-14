@@ -7,16 +7,10 @@ const supabaseUrl =
   process.env.NEXT_PUBLIC_SUPABASE_URL ||
   '';
 
-const supabaseKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SUPABASE_ANON_KEY ||
-  process.env.VITE_SUPABASE_ANON_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-  process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+// A partially configured cloud backend must fail instead of silently saving locally.
+export const isSupabaseConfigured = Boolean(supabaseUrl || supabaseKey);
 
-export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseKey);
 
 let supabaseClient: SupabaseClient | null = null;
 let supabaseFailed = false;
@@ -249,158 +243,41 @@ export async function getSupabaseProfileById(profileId: string): Promise<any | n
   }
 }
 
-export async function createSupabaseProfile(profileId: string, profileData: any): Promise<boolean> {
+function requireCloudClient(): SupabaseClient {
   const client = getSupabaseClient();
-  if (!client) return false;
-
-  try {
-    const hashVal = profileData.password_hash || profileData.passcode_hash || '';
-
-    const { error: pErr } = await client.from('profiles').insert({
-      id: profileId,
-      profile_id: profileId,
-      profile_name: (profileData.profile_name || '').trim(),
-      university: (profileData.university || '').trim(),
-      faculty: (profileData.faculty || '').trim(),
-      department: (profileData.department || '').trim(),
-      degree: (profileData.degree || '').trim(),
-      academic_year: (profileData.academic_year || '').trim(),
-      description: (profileData.description || '').trim(),
-      visibility: profileData.visibility || 'public',
-      passcode_hash: hashVal,
-      password_hash: hashVal
-    });
-
-    if (pErr) return false;
-
-    let order = 1;
-    for (const sem of profileData.semesters || []) {
-      const { data: semRow, error: semErr } = await client
-        .from('semesters')
-        .insert({
-          profile_id: profileId,
-          semester_name: sem.semester_name || `Semester ${order}`,
-          semester_order: sem.semester_order || order
-        })
-        .select('id')
-        .single();
-
-      if (!semErr && semRow && sem.subjects && Array.isArray(sem.subjects)) {
-        const subjectRows = sem.subjects
-          .filter((sub: any) => sub.subject_name)
-          .map((sub: any) => ({
-            semester_id: semRow.id,
-            subject_code: (sub.subject_code || '').trim(),
-            subject_name: (sub.subject_name || '').trim(),
-            credit: parseFloat(sub.credit || 0)
-          }));
-
-        if (subjectRows.length > 0) {
-          await client.from('subjects').insert(subjectRows);
-        }
-      }
-      order++;
-    }
-
-    if (profileData.gradingScale && Array.isArray(profileData.gradingScale)) {
-      const scaleRows = profileData.gradingScale.map((gs: any) => ({
-        profile_id: profileId,
-        grade: String(gs.grade).trim(),
-        grade_point: parseFloat(gs.grade_point || 0)
-      }));
-      if (scaleRows.length > 0) {
-        await client.from('grading_scales').insert(scaleRows);
-      }
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
+  if (!client) throw new Error('Configure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the server.');
+  return client;
 }
 
-export async function updateSupabaseProfile(profileId: string, updateData: any): Promise<boolean> {
-  const client = getSupabaseClient();
-  if (!client) return false;
+async function writeCloudProfile(profileId: string, profileData: any, create: boolean): Promise<boolean> {
+  const client = requireCloudClient();
+  const { error } = await client.rpc('save_gpa_profile', {
+    p_id: profileId, p_data: profileData, p_create: create
+  });
+  if (error) throw new Error('Unable to save cloud profile. Check the database migration and retry.');
+  return true;
+}
 
-  try {
-    const { error: pErr } = await client
-      .from('profiles')
-      .update({
-        profile_name: (updateData.profile_name || '').trim(),
-        university: (updateData.university || '').trim(),
-        faculty: (updateData.faculty || '').trim(),
-        department: (updateData.department || '').trim(),
-        academic_year: (updateData.academic_year || '').trim(),
-        description: (updateData.description || '').trim(),
-        visibility: updateData.visibility || 'public',
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', profileId);
-
-    if (pErr) return false;
-
-    // Delete existing semesters and scales
-    await client.from('semesters').delete().eq('profile_id', profileId);
-    await client.from('grading_scales').delete().eq('profile_id', profileId);
-
-    // Re-insert semesters & subjects
-    let order = 1;
-    for (const sem of updateData.semesters || []) {
-      const { data: semRow, error: semErr } = await client
-        .from('semesters')
-        .insert({
-          profile_id: profileId,
-          semester_name: sem.semester_name || `Semester ${order}`,
-          semester_order: sem.semester_order || order
-        })
-        .select('id')
-        .single();
-
-      if (!semErr && semRow && sem.subjects && Array.isArray(sem.subjects)) {
-        const subjectRows = sem.subjects
-          .filter((sub: any) => sub.subject_name)
-          .map((sub: any) => ({
-            semester_id: semRow.id,
-            subject_code: (sub.subject_code || '').trim(),
-            subject_name: (sub.subject_name || '').trim(),
-            credit: parseFloat(sub.credit || 0)
-          }));
-
-        if (subjectRows.length > 0) {
-          await client.from('subjects').insert(subjectRows);
-        }
-      }
-      order++;
+export async function createSupabaseProfile(profileId: string, profileData: any): Promise<boolean> {
+  if (!isSupabaseConfigured) {
+    if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      throw new Error('Configure the Supabase server environment before creating shared profiles.');
     }
-
-    if (updateData.gradingScale && Array.isArray(updateData.gradingScale)) {
-      const scaleRows = updateData.gradingScale.map((gs: any) => ({
-        profile_id: profileId,
-        grade: String(gs.grade).trim(),
-        grade_point: parseFloat(gs.grade_point || 0)
-      }));
-      if (scaleRows.length > 0) {
-        await client.from('grading_scales').insert(scaleRows);
-      }
-    }
-
-    return true;
-  } catch {
     return false;
   }
+  return writeCloudProfile(profileId, profileData, true);
+}
+
+export async function updateSupabaseProfile(profileId: string, profileData: any): Promise<boolean> {
+  if (!isSupabaseConfigured) return false;
+  return writeCloudProfile(profileId, profileData, false);
 }
 
 export async function deleteSupabaseProfile(profileId: string): Promise<boolean> {
-  const client = getSupabaseClient();
-  if (!client) return false;
-
-  try {
-    const { error } = await client.from('profiles').delete().eq('id', profileId);
-    return !error;
-  } catch {
-    return false;
-  }
+  if (!isSupabaseConfigured) return false;
+  const { error } = await requireCloudClient().from('profiles').delete().eq('id', profileId);
+  if (error) throw new Error('Unable to delete cloud profile. Please retry.');
+  return true;
 }
 
 export async function verifySupabasePasscode(profileId: string, inputHash: string): Promise<{ exists: boolean; valid: boolean }> {
