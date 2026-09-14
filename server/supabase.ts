@@ -183,7 +183,7 @@ export async function getSupabaseProfileById(profileId: string): Promise<any | n
     const { data: profile, error: pErr } = await withTimeout(
       client
         .from('profiles')
-        .select('id, profile_name, university, faculty, department, academic_year, description, visibility, created_at, updated_at, passcode_hash')
+        .select('id, profile_name, university, faculty, department, academic_year, description, visibility, created_at, updated_at, passcode_hash, password_hash')
         .eq('id', cleanId)
         .single() as any,
       3000
@@ -227,6 +227,8 @@ export async function getSupabaseProfileById(profileId: string): Promise<any | n
       .eq('profile_id', cleanId)
       .order('grade_point', { ascending: false });
 
+    const storedHash = profile.password_hash || profile.passcode_hash || '';
+
     return {
       id: profile.id,
       profile_name: profile.profile_name,
@@ -236,7 +238,7 @@ export async function getSupabaseProfileById(profileId: string): Promise<any | n
       academic_year: profile.academic_year || '',
       description: profile.description || '',
       visibility: profile.visibility || 'public',
-      has_passcode: Boolean(profile.passcode_hash && profile.passcode_hash.length > 0),
+      has_passcode: Boolean(storedHash && storedHash.length > 0),
       created_at: profile.created_at,
       updated_at: profile.updated_at,
       semesters: formattedSemesters,
@@ -252,8 +254,11 @@ export async function createSupabaseProfile(profileId: string, profileData: any)
   if (!client) return false;
 
   try {
+    const hashVal = profileData.password_hash || profileData.passcode_hash || '';
+
     const { error: pErr } = await client.from('profiles').insert({
       id: profileId,
+      profile_id: profileId,
       profile_name: (profileData.profile_name || '').trim(),
       university: (profileData.university || '').trim(),
       faculty: (profileData.faculty || '').trim(),
@@ -262,7 +267,8 @@ export async function createSupabaseProfile(profileId: string, profileData: any)
       academic_year: (profileData.academic_year || '').trim(),
       description: (profileData.description || '').trim(),
       visibility: profileData.visibility || 'public',
-      passcode_hash: profileData.passcode_hash || ''
+      passcode_hash: hashVal,
+      password_hash: hashVal
     });
 
     if (pErr) return false;
@@ -404,13 +410,14 @@ export async function verifySupabasePasscode(profileId: string, inputHash: strin
   try {
     const { data, error } = await client
       .from('profiles')
-      .select('passcode_hash')
+      .select('passcode_hash, password_hash')
       .eq('id', profileId)
       .single();
 
     if (error || !data) return { exists: false, valid: false };
-    if (!data.passcode_hash) return { exists: true, valid: true };
-    return { exists: true, valid: data.passcode_hash === inputHash };
+    const hash = data.password_hash || data.passcode_hash || '';
+    if (!hash) return { exists: true, valid: true };
+    return { exists: true, valid: hash === inputHash };
   } catch {
     return { exists: false, valid: false };
   }

@@ -63,6 +63,7 @@ try {
       { name: 'description', type: "TEXT DEFAULT ''" },
       { name: 'visibility', type: "TEXT DEFAULT 'public'" },
       { name: 'passcode_hash', type: "TEXT DEFAULT ''" },
+      { name: 'password_hash', type: "TEXT DEFAULT ''" },
       { name: 'created_at', type: "DATETIME DEFAULT CURRENT_TIMESTAMP" },
       { name: 'updated_at', type: "DATETIME DEFAULT CURRENT_TIMESTAMP" }
     ];

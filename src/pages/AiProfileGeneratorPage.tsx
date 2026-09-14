@@ -8,16 +8,14 @@ import {
   Trash2,
   ArrowRight,
   Loader2,
-  Copy,
-  Check,
   Upload,
   FileText,
   Image as ImageIcon,
   AlertCircle,
-  X,
-  RefreshCw
+  X
 } from 'lucide-react';
 import { extractAiProfile, extractAiProfileFromImage, createProfile } from '../services/dbService';
+import { formatErrorMessage } from '../utils/formatError';
 
 interface AiProfileGeneratorPageProps {
   onProfileCreated: (profileId: string) => void;
@@ -42,6 +40,7 @@ export const AiProfileGeneratorPage: React.FC<AiProfileGeneratorPageProps> = ({
   const [reviewProfile, setReviewProfile] = useState<any | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [createdProfileId, setCreatedProfileId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -199,15 +198,23 @@ PDEV2110 - Career Development II - 0 Credits`;
 
       setCreatedProfileId(res.id);
     } catch (err: any) {
-      setError(err.message || 'Failed to create profile.');
+      setError(formatErrorMessage(err, 'Failed to create profile. Please try again.'));
     } finally {
       setSubmitting(false);
     }
   };
 
-  const shareUrl = createdProfileId ? `${window.location.origin}/#profile-${createdProfileId}` : '';
+  const shareUrl = createdProfileId ? `${window.location.origin}/#/profile/${createdProfileId}` : '';
 
-  const handleCopy = () => {
+  const handleCopyId = () => {
+    if (createdProfileId) {
+      navigator.clipboard.writeText(createdProfileId);
+      setCopiedId(true);
+      setTimeout(() => setCopiedId(false), 2500);
+    }
+  };
+
+  const handleCopyLink = () => {
     if (shareUrl) {
       navigator.clipboard.writeText(shareUrl);
       setCopiedLink(true);
@@ -444,49 +451,54 @@ PDEV2110 - Career Development II - 0 Credits`;
                 </p>
               </div>
 
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Custom Profile Share Link</span>
-                <div className="flex items-center gap-2">
+              {/* Profile ID Card */}
+              <div className="max-w-md mx-auto p-6 bg-slate-50 rounded-2xl border border-slate-200 space-y-4 text-center">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-widest block">Profile ID</span>
+                <div className="text-3xl sm:text-4xl font-black text-indigo-600 font-mono tracking-wider select-all">
+                  {createdProfileId}
+                </div>
+
+                <div className="pt-2 space-y-2">
+                  <span className="text-xs font-semibold text-slate-600 block">Share Link:</span>
                   <input
                     type="text"
                     readOnly
                     value={shareUrl}
-                    className="flex-1 px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-mono text-indigo-700 font-bold select-all"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono text-slate-800 text-center"
                   />
+                </div>
+
+                {/* Buttons: [ Copy Profile ID ], [ Copy Profile Link ], [ Open Profile ] */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2">
                   <button
                     type="button"
-                    onClick={handleCopy}
-                    className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 shrink-0"
+                    onClick={handleCopyId}
+                    className={`px-3 py-2.5 rounded-xl text-xs font-bold transition-all shadow-xs ${
+                      copiedId ? 'bg-emerald-600 text-white' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+                    }`}
                   >
-                    {copiedLink ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                    <span>{copiedLink ? 'Copied!' : 'Copy Link'}</span>
+                    {copiedId ? 'ID Copied!' : 'Copy Profile ID'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleCopyLink}
+                    className={`px-3 py-2.5 rounded-xl text-xs font-bold transition-all shadow-xs ${
+                      copiedLink ? 'bg-emerald-600 text-white' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+                    }`}
+                  >
+                    {copiedLink ? 'Link Copied!' : 'Copy Profile Link'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onProfileCreated(createdProfileId)}
+                    className="px-3 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-transform active:scale-95 flex items-center justify-center space-x-1"
+                  >
+                    <span>Open Profile</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
-              </div>
-
-              <div className="pt-4 flex flex-wrap gap-3 justify-center">
-                <button
-                  type="button"
-                  onClick={() => onProfileCreated(createdProfileId)}
-                  className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center space-x-2 shadow-md"
-                >
-                  <span>Open Profile & Calculate GPA</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCreatedProfileId(null);
-                    setReviewProfile(null);
-                    setInputText('');
-                    setSelectedFile(null);
-                    setImagePreviewUrl(null);
-                  }}
-                  className="px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl flex items-center space-x-1.5"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Create Another Profile</span>
-                </button>
               </div>
             </div>
           ) : reviewProfile ? (

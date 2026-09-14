@@ -16,6 +16,7 @@ import {
   ArrowUpDown
 } from 'lucide-react';
 import { fetchPublicProfiles, fetchFilterOptions, type ProfileFilterParams } from '../services/dbService';
+import { formatErrorMessage } from '../utils/formatError';
 
 interface SearchProfilesPageProps {
   onOpenProfile: (profileId: string) => void;
@@ -97,7 +98,7 @@ export const SearchProfilesPage: React.FC<SearchProfilesPageProps> = ({
       const data = await fetchPublicProfiles(filterParams);
       setProfiles(Array.isArray(data) ? data : []);
     } catch (err: any) {
-      setError(err?.message || 'Failed to search profiles. Please check your connection and try again.');
+      setError(formatErrorMessage(err, 'Failed to search profiles. Please check your connection and try again.'));
     } finally {
       setLoading(false);
     }

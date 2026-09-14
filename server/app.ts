@@ -33,14 +33,18 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// Utility to generate a short readable profile ID (e.g., ABC123, WUSL77)
+// Utility to generate a permanent unique Profile ID (e.g., GPA-N301-A82F91)
 function generateProfileId(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let result = '';
-  for (let i = 0; i < 6; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  let part1 = '';
+  for (let i = 0; i < 4; i++) {
+    part1 += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  return result;
+  let part2 = '';
+  for (let i = 0; i < 6; i++) {
+    part2 += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `GPA-${part1}-${part2}`;
 }
 
 // Hash passcode helper

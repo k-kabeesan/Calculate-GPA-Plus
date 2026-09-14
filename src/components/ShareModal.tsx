@@ -16,20 +16,27 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   profileName,
   onOpenViewer
 }) => {
-  const [copied, setCopied] = useState(false);
+  const [copiedId, setCopiedId] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [showQr, setShowQr] = useState(false);
 
   if (!isOpen) return null;
 
-  const shareUrl = `${window.location.origin}/#profile-${profileId}`;
+  const shareUrl = `${window.location.origin}/#/profile/${profileId}`;
   const whatsappText = `Calculate your GPA using this shared academic profile: "${profileName}"\n${shareUrl}`;
   const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(whatsappText)}`;
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(shareUrl)}`;
 
-  const handleCopy = () => {
+  const handleCopyId = () => {
+    navigator.clipboard.writeText(profileId);
+    setCopiedId(true);
+    setTimeout(() => setCopiedId(false), 2500);
+  };
+
+  const handleCopyLink = () => {
     navigator.clipboard.writeText(shareUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
   };
 
   const handleNativeShare = async () => {
@@ -44,7 +51,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         // User cancelled or not supported
       }
     } else {
-      handleCopy();
+      handleCopyLink();
     }
   };
 
@@ -77,16 +84,26 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             </p>
           </div>
 
-          {/* Action Buttons: Copy, WhatsApp, Share, QR Code */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {/* Action Buttons: Copy Profile ID, Copy Profile Link, WhatsApp, Share, QR Code */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             <button
-              onClick={handleCopy}
+              onClick={handleCopyId}
               className={`p-2.5 rounded-xl font-semibold text-xs flex flex-col items-center justify-center space-y-1 transition-all ${
-                copied ? 'bg-emerald-600 text-white' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+                copiedId ? 'bg-emerald-600 text-white' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
               }`}
             >
-              {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-              <span>{copied ? 'Copied!' : 'Copy Link'}</span>
+              {copiedId ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              <span>{copiedId ? 'ID Copied!' : 'Copy Profile ID'}</span>
+            </button>
+
+            <button
+              onClick={handleCopyLink}
+              className={`p-2.5 rounded-xl font-semibold text-xs flex flex-col items-center justify-center space-y-1 transition-all ${
+                copiedLink ? 'bg-emerald-600 text-white' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+              }`}
+            >
+              {copiedLink ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+              <span>{copiedLink ? 'Link Copied!' : 'Copy Profile Link'}</span>
             </button>
 
             <a

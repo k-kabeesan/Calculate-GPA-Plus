@@ -6,9 +6,9 @@ export interface GradeOption {
 export interface Subject {
   id?: string | number;
   subject_code?: string;
+  module_number?: string;
   subject_name: string;
   credit: number;
-  // For normal calculator & viewer mode:
   selectedGrade?: string;
 }
 
@@ -21,18 +21,22 @@ export interface Semester {
 
 export interface Profile {
   id: string;
+  profile_id?: string;
   profile_name: string;
   university?: string;
   faculty?: string;
   department?: string;
   academic_year?: string;
   description?: string;
-  visibility: 'public' | 'private' | 'shared';
+  visibility?: 'public' | 'private' | 'shared';
   has_passcode?: boolean;
+  passcode_hash?: string;
+  password_hash?: string;
   created_at?: string;
   updated_at?: string;
   total_subjects?: number;
   total_credits?: number;
+  semester_count?: number;
   semesters: Semester[];
   gradingScale: GradeOption[];
 }
@@ -62,3 +66,17 @@ export interface CGPAResult {
   overall_cgpa: number;
   total_subjects: number;
 }
+
+export interface ApiResponse<T = any> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  message?: string;
+}
+
+export interface CreatorAuthResponse {
+  success: boolean;
+  valid: boolean;
+  error?: string;
+}
+

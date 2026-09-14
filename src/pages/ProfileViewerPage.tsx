@@ -5,6 +5,7 @@ import { calculateProfileCGPA } from '../utils/gpa';
 import { generateAcademicPDF, getAcademicHonors } from '../utils/pdfGenerator';
 import { ShareModal } from '../components/ShareModal';
 import { fetchProfileById } from '../services/dbService';
+import { formatErrorMessage } from '../utils/formatError';
 import { GpaProgressChart } from '../components/GpaProgressChart';
 import { GpaInsights } from '../components/GpaInsights';
 
@@ -40,7 +41,7 @@ export const ProfileViewerPage: React.FC<ProfileViewerPageProps> = ({
           } catch {}
         }
       })
-      .catch((err: any) => setError(err.message))
+      .catch((err: any) => setError(formatErrorMessage(err, 'Unable to load profile. Please verify the link or ID.')))
       .finally(() => setLoading(false));
   }, [profileId]);
 

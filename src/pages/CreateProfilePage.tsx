@@ -16,6 +16,7 @@ import type { GradeOption, Subject } from '../types';
 import { DEFAULT_GRADING_SCALE } from '../utils/gpa';
 import { GradingScaleModal } from '../components/GradingScaleModal';
 import { createProfile } from '../services/dbService';
+import { formatErrorMessage } from '../utils/formatError';
 
 interface FormSubject {
   id?: string | number;
@@ -90,7 +91,6 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [createdId, setCreatedId] = useState('');
-  const [copied, setCopied] = useState(false);
 
   // Check if a saved draft exists on mount
   useEffect(() => {
@@ -331,18 +331,31 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
       setCreatedId(result.id);
       setStep(5); // Confirmation screen
     } catch (err: any) {
-      setError(err.message || 'An error occurred while creating profile.');
+      setError(formatErrorMessage(err, 'An error occurred while creating profile. Please try again.'));
     } finally {
       setSubmitting(false);
     }
   };
 
-  const shareUrl = createdId ? `${window.location.origin}/#profile-${createdId}` : '';
+  const [copiedId, setCopiedId] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  const shareUrl = createdId ? `${window.location.origin}/#/profile/${createdId}` : '';
+
+  const handleCopyId = () => {
+    if (createdId) {
+      navigator.clipboard.writeText(createdId);
+      setCopiedId(true);
+      setTimeout(() => setCopiedId(false), 2500);
+    }
+  };
 
   const handleCopyLink = () => {
-    navigator.clipboard.writeText(shareUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+    if (shareUrl) {
+      navigator.clipboard.writeText(shareUrl);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2500);
+    }
   };
 
   return (
@@ -898,43 +911,53 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
           </div>
 
           {/* Profile ID Card */}
-          <div className="max-w-md mx-auto p-6 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-widest block">Public Profile ID</span>
-            <div className="text-4xl font-black text-indigo-600 font-mono tracking-wider select-all">
+          <div className="max-w-md mx-auto p-6 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-widest block">Profile ID</span>
+            <div className="text-3xl sm:text-4xl font-black text-indigo-600 font-mono tracking-wider select-all">
               {createdId}
             </div>
 
-            <div className="pt-3 space-y-2">
+            <div className="pt-2 space-y-2">
               <span className="text-xs font-semibold text-slate-600 block">Share Link:</span>
-              <div className="flex items-center space-x-2">
-                <input
-                  type="text"
-                  readOnly
-                  value={shareUrl}
-                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono text-slate-800"
-                />
-                <button
-                  type="button"
-                  onClick={handleCopyLink}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold text-white shrink-0 transition-colors ${
-                    copied ? 'bg-emerald-600' : 'bg-indigo-600 hover:bg-indigo-700'
-                  }`}
-                >
-                  {copied ? 'Copied!' : 'Copy Link'}
-                </button>
-              </div>
+              <input
+                type="text"
+                readOnly
+                value={shareUrl}
+                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono text-slate-800 text-center"
+              />
             </div>
-          </div>
 
-          <div className="pt-4 flex flex-wrap items-center justify-center gap-4">
-            <button
-              type="button"
-              onClick={() => onProfileCreated(createdId)}
-              className="px-6 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-2xl shadow-md flex items-center space-x-2 transition-transform active:scale-95"
-            >
-              <span>Open & Test Profile</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+            {/* Action Buttons: [ Copy Profile ID ], [ Copy Profile Link ], [ Open Profile ] */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={handleCopyId}
+                className={`px-3 py-2.5 rounded-xl text-xs font-bold transition-all shadow-xs ${
+                  copiedId ? 'bg-emerald-600 text-white' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+                }`}
+              >
+                {copiedId ? 'ID Copied!' : 'Copy Profile ID'}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCopyLink}
+                className={`px-3 py-2.5 rounded-xl text-xs font-bold transition-all shadow-xs ${
+                  copiedLink ? 'bg-emerald-600 text-white' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+                }`}
+              >
+                {copiedLink ? 'Link Copied!' : 'Copy Profile Link'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onProfileCreated(createdId)}
+                className="px-3 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-transform active:scale-95 flex items-center justify-center space-x-1"
+              >
+                <span>Open Profile</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         </div>
       )}

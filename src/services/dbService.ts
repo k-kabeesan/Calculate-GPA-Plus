@@ -1,5 +1,6 @@
 import type { Profile, GradeOption, Semester } from '../types';
 import { DEFAULT_GRADING_SCALE } from '../utils/gpa';
+import { formatErrorMessage } from '../utils/formatError';
 
 const globalProcess = (typeof globalThis !== 'undefined' && (globalThis as any).process) ? (globalThis as any).process.env : {};
 const env = (typeof import.meta !== 'undefined' && (import.meta as any).env) ? (import.meta as any).env : globalProcess;
@@ -8,14 +9,18 @@ const env = (typeof import.meta !== 'undefined' && (import.meta as any).env) ? (
 export const apiBase = (env.VITE_API_URL || '').replace(/\/+$/, '');
 export const isSupabaseConfigured = true;
 
-// Generate readable 6-character profile ID (e.g., ABC123, WUSL77)
-function generateProfileId(): string {
+// Generate permanent unique Profile ID (e.g. GPA-N301-A82F91)
+export function generateProfileId(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let result = '';
-  for (let i = 0; i < 6; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  let part1 = '';
+  for (let i = 0; i < 4; i++) {
+    part1 += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  return result;
+  let part2 = '';
+  for (let i = 0; i < 6; i++) {
+    part2 += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `GPA-${part1}-${part2}`;
 }
 
 // Client-side SHA-256 hash helper using Web Crypto API
@@ -173,9 +178,7 @@ export async function safeFetchJson<T = any>(
   }
 
   if (!res.ok) {
-    const errorMsg = (data && typeof data === 'object' && (data.error || data.message))
-      ? (data.error || data.message)
-      : (fallbackErrMsg || `Request failed with status ${res.status}`);
+    const errorMsg = formatErrorMessage(data, fallbackErrMsg || `Request failed with status ${res.status}`);
     throw new Error(errorMsg);
   }
 

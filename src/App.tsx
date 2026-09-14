@@ -19,49 +19,87 @@ export function App() {
   // State passed from normal calculator when user clicks "Save as Shared Profile"
   const [prefilledSubjects, setPrefilledSubjects] = useState<Subject[]>([]);
 
-  // Parse URL hash for direct links like /#profile-ABC123
+  // Parse URL hash or path for direct links like /#profile-GPA-N301-A82F91 or /#/profile/GPA-N301-A82F91 or /profile/GPA-N301-A82F91
   useEffect(() => {
-    const handleHashChange = () => {
+    const handleLocationChange = () => {
       const hash = window.location.hash;
-      if (hash.startsWith('#profile-')) {
+      const pathname = window.location.pathname;
+
+      if (hash.startsWith('#/profile/') || hash.startsWith('#profile/')) {
+        const id = hash.replace(/^#\/?profile\//, '').trim().toUpperCase();
+        if (id) {
+          setSelectedProfileId(id);
+          setActiveTab('viewer');
+          return;
+        }
+      } else if (hash.startsWith('#profile-')) {
         const id = hash.replace('#profile-', '').trim().toUpperCase();
         if (id) {
           setSelectedProfileId(id);
           setActiveTab('viewer');
+          return;
+        }
+      } else if (hash.startsWith('#/manage/') || hash.startsWith('#manage/')) {
+        const id = hash.replace(/^#\/?manage\//, '').trim().toUpperCase();
+        if (id) {
+          setSelectedProfileId(id);
+          setActiveTab('manage');
+          return;
         }
       } else if (hash.startsWith('#manage-')) {
         const id = hash.replace('#manage-', '').trim().toUpperCase();
         if (id) {
           setSelectedProfileId(id);
           setActiveTab('manage');
+          return;
         }
-      } else if (hash === '#ai') {
+      } else if (pathname.startsWith('/profile/')) {
+        const id = pathname.replace('/profile/', '').trim().toUpperCase();
+        if (id) {
+          setSelectedProfileId(id);
+          setActiveTab('viewer');
+          return;
+        }
+      } else if (pathname.startsWith('/manage/')) {
+        const id = pathname.replace('/manage/', '').trim().toUpperCase();
+        if (id) {
+          setSelectedProfileId(id);
+          setActiveTab('manage');
+          return;
+        }
+      } else if (hash === '#ai' || hash === '#/ai') {
         setActiveTab('ai');
-      } else if (hash === '#search') {
+      } else if (hash === '#search' || hash === '#/search') {
         setActiveTab('search');
-      } else if (hash === '#privacy') {
+      } else if (hash === '#privacy' || hash === '#/privacy') {
         setActiveTab('privacy');
-      } else if (hash === '#about') {
+      } else if (hash === '#about' || hash === '#/about') {
         setActiveTab('about');
+      } else if (hash === '#create' || hash === '#/create') {
+        setActiveTab('create');
       }
     };
 
-    handleHashChange();
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    handleLocationChange();
+    window.addEventListener('hashchange', handleLocationChange);
+    window.addEventListener('popstate', handleLocationChange);
+    return () => {
+      window.removeEventListener('hashchange', handleLocationChange);
+      window.removeEventListener('popstate', handleLocationChange);
+    };
   }, []);
 
   const handleNavigate = (page: string, params?: any) => {
     if (page === 'viewer' && params?.id) {
       setSelectedProfileId(params.id);
-      window.location.hash = `profile-${params.id}`;
+      window.location.hash = `/profile/${params.id}`;
       setActiveTab('viewer');
     } else if (page === 'manage' && params?.id) {
       setSelectedProfileId(params.id);
-      window.location.hash = `manage-${params.id}`;
+      window.location.hash = `/manage/${params.id}`;
       setActiveTab('manage');
     } else {
-      window.location.hash = page;
+      window.location.hash = `/${page}`;
       setActiveTab(page as any);
     }
   };

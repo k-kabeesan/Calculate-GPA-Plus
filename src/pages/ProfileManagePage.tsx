@@ -5,6 +5,7 @@ import { DEFAULT_GRADING_SCALE } from '../utils/gpa';
 import { GradingScaleModal } from '../components/GradingScaleModal';
 import { ShareModal } from '../components/ShareModal';
 import { fetchProfileById, verifyOwnerPasscode, updateProfile, deleteProfile } from '../services/dbService';
+import { formatErrorMessage } from '../utils/formatError';
 
 interface ProfileManagePageProps {
   profileId: string;
@@ -63,7 +64,7 @@ export const ProfileManagePage: React.FC<ProfileManagePageProps> = ({
           setIsUnlocked(true);
         }
       })
-      .catch((err: any) => setError(err.message))
+      .catch((err: any) => setError(formatErrorMessage(err, 'Unable to load profile.')))
       .finally(() => setLoading(false));
   }, [profileId]);
 
@@ -79,7 +80,7 @@ export const ProfileManagePage: React.FC<ProfileManagePageProps> = ({
       }
       setIsUnlocked(true);
     } catch (err: any) {
-      setPassError(err.message);
+      setPassError(formatErrorMessage(err, 'Incorrect owner passcode.'));
     } finally {
       setVerifying(false);
     }
@@ -96,14 +97,15 @@ export const ProfileManagePage: React.FC<ProfileManagePageProps> = ({
       return;
     }
 
-    // Subject Credit Validation Rule:
+    // Subject Credit Validation Rule: Allow 0 credit as valid
     let hasInvalidCreditSubject = false;
     for (const sem of semesters) {
       for (const sub of sem.subjects) {
         const hasCode = Boolean((sub as any).subject_code && (sub as any).subject_code.trim());
         const hasName = Boolean(sub.subject_name && sub.subject_name.trim());
         if (hasCode || hasName) {
-          if (!sub.credit || Number(sub.credit) <= 0) {
+          const isInvalid = sub.credit === undefined || sub.credit === null || isNaN(Number(sub.credit)) || Number(sub.credit) < 0;
+          if (isInvalid) {
             hasInvalidCreditSubject = true;
             break;
           }
@@ -113,16 +115,20 @@ export const ProfileManagePage: React.FC<ProfileManagePageProps> = ({
     }
 
     if (hasInvalidCreditSubject) {
-      setError('Credit is required for every subject or module.');
+      setError('Credit is required for every subject or module (0 credit is allowed, negative credits are invalid).');
       setSaving(false);
       return;
     }
 
-    // Filter non-empty subject rows
+    // Filter non-empty subject rows (credit 0 is valid!)
     const cleanedSemesters = semesters.map((sem, idx) => ({
       ...sem,
       semester_name: sem.semester_name.trim() || `Semester ${idx + 1}`,
-      subjects: sem.subjects.filter(sub => (sub.subject_name.trim() || ((sub as any).subject_code && (sub as any).subject_code.trim())) && Number(sub.credit) > 0)
+      subjects: sem.subjects.filter(sub => {
+        const hasText = Boolean(sub.subject_name.trim() || ((sub as any).subject_code && (sub as any).subject_code.trim()));
+        const isValidCredit = sub.credit !== null && sub.credit !== undefined && !isNaN(Number(sub.credit)) && Number(sub.credit) >= 0;
+        return hasText && isValidCredit;
+      })
     }));
 
     try {
@@ -141,7 +147,7 @@ export const ProfileManagePage: React.FC<ProfileManagePageProps> = ({
       setSuccessMsg('Profile updated successfully!');
       setTimeout(() => setSuccessMsg(''), 3000);
     } catch (err: any) {
-      setError(err.message);
+      setError(formatErrorMessage(err, 'Failed to update profile.'));
     } finally {
       setSaving(false);
     }
