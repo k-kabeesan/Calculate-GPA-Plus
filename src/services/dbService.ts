@@ -9,8 +9,24 @@ const env = (typeof import.meta !== 'undefined' && (import.meta as any).env) ? (
 export const apiBase = (env.VITE_API_URL || '').replace(/\/+$/, '');
 export const isSupabaseConfigured = true;
 
-const supabaseUrl = env.VITE_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY || env.VITE_SUPABASE_PUBLISHABLE_KEY || env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || '';
+const supabaseUrl =
+  env.VITE_SUPABASE_URL ||
+  env.SUPABASE_URL ||
+  env.NEXT_PUBLIC_SUPABASE_URL ||
+  env.SUPAB_URL ||
+  env.VITE_URL ||
+  '';
+
+const supabaseAnonKey =
+  env.VITE_SUPABASE_ANON_KEY ||
+  env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+  env.SUPABASE_SERVICE_ROLE_KEY ||
+  env.SUPABASE_KEY ||
+  env.SUPAB_KEY ||
+  env.VITE_SUPABASE_KEY ||
+  env.VITE_KEY ||
+  '';
 
 let clientSupabase: SupabaseClient | null = null;
 if (supabaseUrl && supabaseAnonKey) {
@@ -369,7 +385,7 @@ export async function fetchPublicProfiles(paramsOrQuery: string | ProfileFilterP
     if (localProfiles.length > 0) {
       return localProfiles;
     }
-    throw err;
+    return [];
   }
 }
 

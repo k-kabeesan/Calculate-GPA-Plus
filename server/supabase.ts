@@ -5,6 +5,8 @@ const supabaseUrl =
   process.env.SUPABASE_URL ||
   process.env.VITE_SUPABASE_URL ||
   process.env.NEXT_PUBLIC_SUPABASE_URL ||
+  process.env.SUPAB_URL ||
+  process.env.VITE_URL ||
   '';
 
 const supabaseKey =
@@ -12,6 +14,10 @@ const supabaseKey =
   process.env.VITE_SUPABASE_ANON_KEY ||
   process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+  process.env.SUPABASE_KEY ||
+  process.env.SUPAB_KEY ||
+  process.env.VITE_SUPABASE_KEY ||
+  process.env.VITE_KEY ||
   '';
 // A partially configured cloud backend must fail instead of silently saving locally.
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseKey);
