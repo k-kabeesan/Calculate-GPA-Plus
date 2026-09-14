@@ -8,7 +8,8 @@
     "server": "tsx server/index.ts",
     "client": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "tsx scratch/test_suite.ts && tsx scratch/test_regressions.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",

@@ -3,12 +3,7 @@
 -- Paste this script into your Supabase SQL Editor and click "Run"
 -- =============================================================
 
--- Safe Migration for existing Supabase projects
-ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS profile_id TEXT DEFAULT '';
-ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS department TEXT DEFAULT '';
-ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS password_hash TEXT DEFAULT '';
-ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS passcode_hash TEXT DEFAULT '';
-ALTER TABLE public.subjects ADD COLUMN IF NOT EXISTS module_number TEXT DEFAULT '';
+BEGIN;
 
 -- 1. Profiles Table
 CREATE TABLE IF NOT EXISTS public.profiles (
@@ -33,7 +28,7 @@ CREATE INDEX IF NOT EXISTS idx_profiles_id ON public.profiles(id);
 CREATE INDEX IF NOT EXISTS idx_profiles_name ON public.profiles(profile_name);
 CREATE INDEX IF NOT EXISTS idx_profiles_university ON public.profiles(university);
 CREATE INDEX IF NOT EXISTS idx_profiles_faculty ON public.profiles(faculty);
-CREATE INDEX IF NOT EXISTS idx_profiles_department ON public.profiles(department);
+
 CREATE INDEX IF NOT EXISTS idx_profiles_academic_year ON public.profiles(academic_year);
 CREATE INDEX IF NOT EXISTS idx_profiles_visibility ON public.profiles(visibility);
 
@@ -70,60 +65,151 @@ CREATE TABLE IF NOT EXISTS public.grading_scales (
 
 CREATE INDEX IF NOT EXISTS idx_grading_scales_profile_id ON public.grading_scales(profile_id);
 
+-- Safe Migration for existing Supabase projects
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS profile_id TEXT DEFAULT '';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS department TEXT DEFAULT '';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS password_hash TEXT DEFAULT '';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS passcode_hash TEXT DEFAULT '';
+ALTER TABLE public.subjects ADD COLUMN IF NOT EXISTS module_number TEXT DEFAULT '';
+
+CREATE INDEX IF NOT EXISTS idx_profiles_department ON public.profiles(department);
+
 -- Enable Row Level Security (RLS)
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.semesters ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.subjects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.grading_scales ENABLE ROW LEVEL SECURITY;
 
--- Public RLS Policies for Profiles (Read access enabled for shared public profiles)
+-- Remove legacy permissive policies for all four tables.
 DROP POLICY IF EXISTS "Public profiles read access" ON public.profiles;
-CREATE POLICY "Public profiles read access" ON public.profiles FOR SELECT USING (true);
 
 DROP POLICY IF EXISTS "Public profiles insert access" ON public.profiles;
-CREATE POLICY "Public profiles insert access" ON public.profiles FOR INSERT WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Public profiles update access" ON public.profiles;
-CREATE POLICY "Public profiles update access" ON public.profiles FOR UPDATE USING (true);
 
 DROP POLICY IF EXISTS "Public profiles delete access" ON public.profiles;
-CREATE POLICY "Public profiles delete access" ON public.profiles FOR DELETE USING (true);
 
--- Public RLS Policies for Semesters
 DROP POLICY IF EXISTS "Public semesters read access" ON public.semesters;
-CREATE POLICY "Public semesters read access" ON public.semesters FOR SELECT USING (true);
 
 DROP POLICY IF EXISTS "Public semesters insert access" ON public.semesters;
-CREATE POLICY "Public semesters insert access" ON public.semesters FOR INSERT WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Public semesters update access" ON public.semesters;
-CREATE POLICY "Public semesters update access" ON public.semesters FOR UPDATE USING (true);
 
 DROP POLICY IF EXISTS "Public semesters delete access" ON public.semesters;
-CREATE POLICY "Public semesters delete access" ON public.semesters FOR DELETE USING (true);
 
--- Public RLS Policies for Subjects
 DROP POLICY IF EXISTS "Public subjects read access" ON public.subjects;
-CREATE POLICY "Public subjects read access" ON public.subjects FOR SELECT USING (true);
 
 DROP POLICY IF EXISTS "Public subjects insert access" ON public.subjects;
-CREATE POLICY "Public subjects insert access" ON public.subjects FOR INSERT WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Public subjects update access" ON public.subjects;
-CREATE POLICY "Public subjects update access" ON public.subjects FOR UPDATE USING (true);
 
 DROP POLICY IF EXISTS "Public subjects delete access" ON public.subjects;
-CREATE POLICY "Public subjects delete access" ON public.subjects FOR DELETE USING (true);
 
--- Public RLS Policies for Grading Scales
 DROP POLICY IF EXISTS "Public grading scales read access" ON public.grading_scales;
-CREATE POLICY "Public grading scales read access" ON public.grading_scales FOR SELECT USING (true);
 
 DROP POLICY IF EXISTS "Public grading scales insert access" ON public.grading_scales;
-CREATE POLICY "Public grading scales insert access" ON public.grading_scales FOR INSERT WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Public grading scales update access" ON public.grading_scales;
-CREATE POLICY "Public grading scales update access" ON public.grading_scales FOR UPDATE USING (true);
 
 DROP POLICY IF EXISTS "Public grading scales delete access" ON public.grading_scales;
-CREATE POLICY "Public grading scales delete access" ON public.grading_scales FOR DELETE USING (true);
+
+-- Enable Row Level Security (RLS) and grant SELECT access to anon & authenticated for public profiles
+GRANT SELECT ON TABLE public.profiles, public.semesters, public.subjects, public.grading_scales TO anon, authenticated;
+GRANT ALL ON TABLE public.profiles, public.semesters, public.subjects, public.grading_scales TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.semesters_id_seq, public.subjects_id_seq, public.grading_scales_id_seq TO anon, authenticated, service_role;
+
+DROP POLICY IF EXISTS "Public profiles select policy" ON public.profiles;
+CREATE POLICY "Public profiles select policy" ON public.profiles
+  FOR SELECT TO anon, authenticated
+  USING (visibility = 'public');
+
+DROP POLICY IF EXISTS "Public semesters select policy" ON public.semesters;
+CREATE POLICY "Public semesters select policy" ON public.semesters
+  FOR SELECT TO anon, authenticated
+  USING (true);
+
+DROP POLICY IF EXISTS "Public subjects select policy" ON public.subjects;
+CREATE POLICY "Public subjects select policy" ON public.subjects
+  FOR SELECT TO anon, authenticated
+  USING (true);
+
+DROP POLICY IF EXISTS "Public grading scales select policy" ON public.grading_scales;
+CREATE POLICY "Public grading scales select policy" ON public.grading_scales
+  FOR SELECT TO anon, authenticated
+  USING (true);
+
+-- One RPC call is one PostgreSQL transaction. Any validation or insert failure
+-- rolls back profile metadata, deletions, and all replacement rows together.
+CREATE OR REPLACE FUNCTION public.save_gpa_profile(p_id text, p_data jsonb, p_create boolean)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public
+AS $$
+DECLARE
+  sem jsonb;
+  sub jsonb;
+  gs jsonb;
+  sem_id bigint;
+  sem_order integer := 0;
+  credit_value numeric;
+  grade_value numeric;
+BEGIN
+  IF coalesce(btrim(p_data->>'profile_name'), '') = '' THEN
+    RAISE EXCEPTION 'Profile name is required';
+  END IF;
+  IF coalesce(p_data->>'visibility', 'public') NOT IN ('public', 'shared', 'private') THEN
+    RAISE EXCEPTION 'Invalid visibility';
+  END IF;
+  IF p_create THEN
+    INSERT INTO public.profiles (id, profile_id, profile_name, university, faculty, passcode_hash, password_hash)
+    VALUES (p_id, p_id, btrim(p_data->>'profile_name'), '', '',
+      coalesce(p_data->>'passcode_hash', ''), coalesce(p_data->>'passcode_hash', ''));
+  ELSE
+    PERFORM 1 FROM public.profiles WHERE id = p_id FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Profile not found'; END IF;
+  END IF;
+
+  UPDATE public.profiles SET
+    profile_name = btrim(p_data->>'profile_name'),
+    university = coalesce(btrim(p_data->>'university'), ''),
+    faculty = coalesce(btrim(p_data->>'faculty'), ''),
+    department = coalesce(btrim(p_data->>'department'), ''),
+    academic_year = coalesce(btrim(p_data->>'academic_year'), ''),
+    description = coalesce(btrim(p_data->>'description'), ''),
+    visibility = coalesce(p_data->>'visibility', 'public'),
+    updated_at = now()
+  WHERE id = p_id;
+
+  DELETE FROM public.semesters WHERE profile_id = p_id;
+  DELETE FROM public.grading_scales WHERE profile_id = p_id;
+  FOR sem IN SELECT value FROM jsonb_array_elements(coalesce(p_data->'semesters', '[]'::jsonb)) LOOP
+    sem_order := sem_order + 1;
+    INSERT INTO public.semesters (profile_id, semester_name, semester_order)
+    VALUES (p_id, coalesce(nullif(sem->>'semester_name', ''), 'Semester ' || sem_order), sem_order)
+    RETURNING id INTO sem_id;
+    FOR sub IN SELECT value FROM jsonb_array_elements(coalesce(sem->'subjects', '[]'::jsonb)) LOOP
+      credit_value := (sub->>'credit')::numeric;
+      IF credit_value IS NULL OR credit_value < 0 OR credit_value::text IN ('NaN', 'Infinity', '-Infinity')
+         OR coalesce(btrim(sub->>'subject_name'), '') = '' THEN
+        RAISE EXCEPTION 'Invalid subject name or credit';
+      END IF;
+      INSERT INTO public.subjects (semester_id, subject_code, module_number, subject_name, credit)
+      VALUES (sem_id, coalesce(sub->>'subject_code', ''), coalesce(sub->>'subject_code', ''), btrim(sub->>'subject_name'), credit_value);
+    END LOOP;
+  END LOOP;
+  FOR gs IN SELECT value FROM jsonb_array_elements(coalesce(p_data->'gradingScale', '[]'::jsonb)) LOOP
+    grade_value := (gs->>'grade_point')::numeric;
+    IF grade_value IS NULL OR grade_value < 0 OR grade_value::text IN ('NaN', 'Infinity', '-Infinity')
+       OR coalesce(btrim(gs->>'grade'), '') = '' THEN
+      RAISE EXCEPTION 'Invalid grading scale';
+    END IF;
+    INSERT INTO public.grading_scales (profile_id, grade, grade_point)
+    VALUES (p_id, btrim(gs->>'grade'), grade_value);
+  END LOOP;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.save_gpa_profile(text, jsonb, boolean) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.save_gpa_profile(text, jsonb, boolean) TO service_role;
+
+COMMIT;

@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import db from './db';
 import {
+  isSupabaseConfigured,
   getSupabaseProfiles,
   getSupabaseFilterOptions,
   getSupabaseProfileById,
@@ -572,7 +573,7 @@ app.post(['/api/profiles', '/profiles'], async (req: Request, res: Response) => 
     const hashed = hashPasscode(passcode);
 
     // Persist to Supabase if configured
-    await createSupabaseProfile(profileId, {
+    const cloudCreated = await createSupabaseProfile(profileId, {
       profile_name,
       university,
       faculty,
@@ -585,6 +586,8 @@ app.post(['/api/profiles', '/profiles'], async (req: Request, res: Response) => 
       semesters,
       gradingScale
     });
+
+    if (cloudCreated) return res.status(201).json({ success: true, id: profileId, message: 'Profile created successfully!' });
 
     const insertProfile = db.prepare(`
       INSERT INTO profiles (id, profile_name, university, faculty, department, degree, academic_year, description, visibility, passcode_hash)
@@ -657,7 +660,7 @@ app.post(['/api/profiles/:id/verify-passcode', '/profiles/:id/verify-passcode'],
     const { passcode } = req.body;
     const hashed = hashPasscode(passcode || '');
 
-    const profile = db.prepare('SELECT passcode_hash FROM profiles WHERE id = ?').get(profileId) as any;
+    const profile = isSupabaseConfigured ? null : db.prepare('SELECT passcode_hash FROM profiles WHERE id = ?').get(profileId) as any;
     if (profile) {
       if (!profile.passcode_hash) {
         return res.json({ success: true, valid: true });
@@ -702,7 +705,7 @@ app.put(['/api/profiles/:id', '/profiles/:id'], async (req: Request, res: Respon
     } = req.body;
 
     const hashedInput = hashPasscode(passcode || '');
-    const existing = db.prepare('SELECT passcode_hash FROM profiles WHERE id = ?').get(profileId) as any;
+    const existing = isSupabaseConfigured ? null : db.prepare('SELECT passcode_hash FROM profiles WHERE id = ?').get(profileId) as any;
 
     if (existing) {
       if (existing.passcode_hash && hashedInput !== existing.passcode_hash) {
@@ -806,12 +809,11 @@ app.delete(['/api/profiles/:id', '/profiles/:id'], async (req: Request, res: Res
     const profileId = (req.params.id as string).toUpperCase();
     const { passcode } = req.body || {};
 
-    const existing = db.prepare('SELECT passcode_hash FROM profiles WHERE id = ?').get(profileId) as any;
+    const existing = isSupabaseConfigured ? null : db.prepare('SELECT passcode_hash FROM profiles WHERE id = ?').get(profileId) as any;
     if (!existing) {
-      const supaProfile = await getSupabaseProfileById(profileId);
-      if (!supaProfile) {
-        return res.status(404).json({ success: false, error: 'Profile not found' });
-      }
+      const check = await verifySupabasePasscode(profileId, hashPasscode(passcode || ''));
+      if (!check.exists) return res.status(404).json({ success: false, error: 'Profile not found' });
+      if (!check.valid) return res.status(401).json({ success: false, error: 'Unauthorized. Invalid owner passcode.' });
     }
 
     if (existing && existing.passcode_hash) {

@@ -22,3 +22,43 @@ Created by **K.Kabeesan**
 
 ## License
 MIT License © 2026 Calculate GPA Plus - Created by K.Kabeesan.
+
+
+## Local development
+
+Install Node.js and run:
+
+```sh
+npm install
+npm run dev
+```
+
+The frontend runs on port 5173 and proxies API requests to Express on port 5000.
+Without Supabase configuration, the local Express server uses SQLite. Shared
+profile creation, editing, deletion, and passcode verification require a working
+API. Browser storage is only a read cache; failed writes are reported as errors.
+Static-only hosting needs a separately hosted API configured with `VITE_API_URL`.
+
+Run `npm test` for calculation and regression checks, and `npm run build` for the production build.
+The regression suite mocks cloud requests and does not modify the live database.
+
+## Supabase setup and upgrade
+
+1. Run the entire [supabase_schema.sql](supabase_schema.sql) in the Supabase SQL Editor.
+   The script works for fresh databases and the existing project schema. It keeps
+   existing profiles, removes the old unrestricted policies, and installs the
+   `save_gpa_profile` transactional function. Run it before deploying the updated server.
+2. Configure `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in the server environment
+   (for example, Vercel project environment variables), then redeploy the app.
+   The service-role key must never use a `VITE_` or `NEXT_PUBLIC_` prefix or be included
+   in browser code. Anonymous/publishable keys are no longer used for server writes.
+3. Verify that creating, editing, and deleting a test profile works, and that an
+   incorrect owner passcode is rejected.
+
+Cloud saves replace the profile and its subjects in a single database transaction.
+Any failure rolls back the entire save. A configured cloud backend is authoritative
+for writes: database errors are not converted into successful local saves.
+Serverless deployments require Supabase for profile creation.
+
+The SQL migration requires access to your Supabase project and is not applied by
+`npm run build` or `npm test`.
