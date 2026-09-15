@@ -1,3 +1,4 @@
+import { normalizeImportedProfile } from '../src/utils/profileImport';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
@@ -100,7 +101,7 @@ function extractProfileFallback(inputText: string) {
   let academicYear = '';
   let semester = '';
 
-  const subjects: Array<{ moduleNumber: string; subjectName: string; credit: number | null }> = [];
+  const subjects: Array<{ moduleNumber: string; subjectName: string; credit: number | null; semester: string }> = [];
 
   for (const line of lines) {
     // Skip lecturer, staff, room, time, contact, or page number lines
@@ -160,7 +161,7 @@ function extractProfileFallback(inputText: string) {
       const match = line.match(/\b(20\d{2}[-/–]20\d{2}|20\d{2}[-/–]\d{2}|Year\s*[1-4])\b/i);
       if (match) academicYear = match[1];
     }
-    if (!semester && /\b(Semester\s*[1-8]|Sem\s*[1-8]|Term\s*[1-3])\b/i.test(line)) {
+    if (/\b(Semester\s*[1-8]|Sem\s*[1-8]|Term\s*[1-3])\b/i.test(line)) {
       const match = line.match(/\b(Semester\s*[1-8]|Sem\s*[1-8]|Term\s*[1-3])\b/i);
       if (match) semester = match[1];
     }
@@ -174,7 +175,7 @@ function extractProfileFallback(inputText: string) {
       let credit: number | null = null;
 
       // Priority 1: Explicit credit in text
-      const creditMatch = remainingText.match(/(?:[-–—,\(:\s]|^)(?:credits?|cr|credit\s+hours?|pts?|c\.h\.)?\s*([0-9](?:\.[0-9]+)?)\s*(?:credits?|cr|credit\s+hours?|pts?|c\.h\.)?(?:[\)]|\s|$)/i);
+      const creditMatch = remainingText.match(/(?:^|[\s(:,])([0-9]+(?:\.[0-9]+)?)\s*(?:credits?|cr|pts?|credit hours?|c\.h\.)(?:$|[)\s])/i);
       if (creditMatch && creditMatch[1]) {
         const parsed = parseFloat(creditMatch[1]);
         if (!isNaN(parsed) && parsed >= 0 && parsed <= 20) {
@@ -187,17 +188,6 @@ function extractProfileFallback(inputText: string) {
         .replace(/[\(\[\{]\s*(?:credit[s]?|cr|pts?|units?)?\s*[\)\]\}]/gi, '')
         .trim();
 
-      // Priority 2: Last digit fallback if credit is missing
-      if (credit === null && moduleNumber) {
-        const digits = moduleNumber.match(/\d/g);
-        if (digits && digits.length > 0) {
-          const lastDigitVal = parseInt(digits[digits.length - 1], 10);
-          if (!isNaN(lastDigitVal)) {
-            credit = lastDigitVal;
-          }
-        }
-      }
-
       subjectTitle = cleanSubjectTitle(subjectTitle);
 
       if (!subjectTitle && moduleNumber) {
@@ -208,7 +198,7 @@ function extractProfileFallback(inputText: string) {
         subjects.push({
           moduleNumber: moduleNumber,
           subjectName: subjectTitle,
-          credit: credit
+          credit: credit, semester
         });
       }
     }
@@ -239,84 +229,7 @@ function cleanAndParseJson(text: string): any {
   return JSON.parse(cleaned);
 }
 
-function normalizeAiProfileOutput(raw: any) {
-  if (!raw || typeof raw !== 'object') {
-    raw = {};
-  }
-  let profileName = raw.profileName || raw.profile_name || '';
-  if (
-    profileName === 'Not detected' ||
-    /Academic Profile/i.test(profileName) ||
-    /Semester\s*\d+/i.test(profileName) ||
-    /University/i.test(profileName) ||
-    /Faculty/i.test(profileName) ||
-    /Department/i.test(profileName) ||
-    /Bachelor|BSc|MSc|Master|Degree|Diploma/i.test(profileName)
-  ) {
-    profileName = '';
-  }
-
-  let university = raw.university === 'Not detected' ? '' : (raw.university || '');
-  let faculty = raw.faculty === 'Not detected' ? '' : (raw.faculty || '');
-  let department = raw.department === 'Not detected' ? '' : (raw.department || '');
-  let academicYear = raw.academicYear || raw.academic_year || '';
-  if (academicYear === 'Not detected') academicYear = '';
-
-  let semester = raw.semester || '';
-  if (semester === 'Not detected') semester = '';
-
-  let subjects: Array<{ moduleNumber: string; subjectName: string; credit: number | null }> = [];
-
-  const extractSubjectObj = (s: any) => {
-    const mod = (s.moduleNumber || s.subject_code || s.code || '').trim();
-    let name = cleanSubjectTitle((s.subjectName || s.subject_name || s.name || mod || '').trim());
-
-    let cr: number | null = null;
-    if (s.credit !== null && s.credit !== undefined && s.credit !== '' && !isNaN(Number(s.credit))) {
-      cr = Number(s.credit);
-    } else if (mod) {
-      const digits = mod.match(/\d/g);
-      if (digits && digits.length > 0) {
-        const lastDigitVal = parseInt(digits[digits.length - 1], 10);
-        if (!isNaN(lastDigitVal)) cr = lastDigitVal;
-      }
-    }
-
-    return {
-      moduleNumber: mod === 'Not detected' ? '' : mod,
-      subjectName: name === 'Not detected' ? '' : name,
-      credit: cr
-    };
-  };
-
-  if (Array.isArray(raw.subjects)) {
-    subjects = raw.subjects.map(extractSubjectObj).filter((s: any) => s.moduleNumber || s.subjectName);
-  } else if (Array.isArray(raw.semesters)) {
-    raw.semesters.forEach((sem: any) => {
-      if (!semester && sem.semester_name) {
-        semester = sem.semester_name;
-      }
-      if (Array.isArray(sem.subjects)) {
-        sem.subjects.forEach((s: any) => {
-          const extractedSub = extractSubjectObj(s);
-          if (extractedSub.moduleNumber || extractedSub.subjectName) {
-            subjects.push(extractedSub);
-          }
-        });
-      }
-    });
-  }
-
-  return {
-    profileName,
-    university,
-    faculty,
-    department,
-    academicYear,
-    semester,
-    subjects
-  };
-}
+function normalizeAiProfileOutput(raw: any) { return normalizeImportedProfile(raw, cleanSubjectTitle); }
 
 // -------------------------------------------------------------
 // API Routes
@@ -561,7 +474,24 @@ app.post(['/api/profiles', '/profiles'], async (req: Request, res: Response) => 
     } = req.body;
 
     if (!profile_name || !profile_name.trim()) {
-      return res.status(400).json({ success: false, error: 'Profile Name is required.' });
+      return res.status(400).json({ success: false, error: 'Profile name is required.' });
+    }
+
+    if (!passcode || !passcode.trim()) {
+      return res.status(400).json({ success: false, error: 'Owner edit passcode is required.' });
+    }
+
+    for (const sem of semesters || []) {
+      for (const sub of sem.subjects || []) {
+        const code = (sub.subject_code || sub.module_number || '').trim();
+        const name = (sub.subject_name || '').trim();
+        if (code || name) {
+          const isCreditMissing = sub.credit === null || sub.credit === undefined || sub.credit === '' || isNaN(Number(sub.credit)) || Number(sub.credit) < 0;
+          if (isCreditMissing) {
+            return res.status(400).json({ success: false, error: 'Credit is required for every subject.' });
+          }
+        }
+      }
     }
 
     // Ensure unique profile ID
@@ -847,38 +777,40 @@ app.post(['/api/ai/extract-profile', '/ai/extract-profile'], async (req: Request
     const apiUrl = process.env.OPENROUTER_API_URL || process.env.AI_API_URL || 'https://openrouter.ai/api/v1/chat/completions';
 
     if (openrouterApiKey && openrouterApiKey.trim()) {
-      const systemPrompt = `You are a high-precision academic document vision extraction system.
-Analyze the user's document image or text and extract academic profile details and subject modules ONLY.
+      const systemPrompt = `You are a high-precision academic document vision & text extraction system.
+Analyze the user's document image, PDF, or text and extract academic profile details and subject modules ONLY.
 
 You MUST output ONLY a single raw JSON object matching this EXACT structure:
 {
-  "profileName": "string",
-  "university": "string",
-  "faculty": "string",
-  "department": "string",
-  "academicYear": "string",
-  "semester": "string",
-  "subjects": [
+  "profileName": "",
+  "university": "",
+  "faculty": "",
+  "department": "",
+  "academicYear": "",
+  "semesters": [
     {
-      "moduleNumber": "string",
-      "subjectName": "string",
-      "credit": 0
+      "name": "Semester 1",
+      "subjects": [
+        {
+          "moduleCode": "NANO01232",
+          "subjectName": "Fundamentals of Physics II",
+          "credit": 2
+        }
+      ]
     }
   ]
 }
 
 STRICT MANDATORY RULES:
-1. OUTPUT JSON ONLY. Do NOT wrap in markdown code blocks (\`\`\`json). Do NOT add any explanations, introductions, or trailing text before or after the JSON.
-2. PROFILE NAME: Only set profileName if an explicit profile name label is written on the document (e.g. "PROFILE NAME: ..."). Otherwise, set "profileName": "". Do NOT use university, faculty, department, semester, degree name, or subject name as profileName.
-3. SUBJECT EXTRACTION:
+1. OUTPUT JSON ONLY. Do NOT wrap in markdown code blocks. Do NOT add any explanations outside JSON.
+2. PROFILE NAME: Only set profileName if an explicit profile name label is written on the document (e.g. "PROFILE NAME: ..."). Otherwise set "profileName": "".
+3. SUBJECT EXTRACTION & LECTURER / TIMETABLE EXCLUSION:
    - Extract ONLY actual academic subjects / courses / modules.
-   - NEVER extract lecturer names, professor names, instructor names, staff names, contact details, email addresses, phone numbers, room numbers, building names, lab names, class times, dates, page numbers, decorative text, logos, or generic table headings as subjects.
+   - NEVER extract lecturer names (e.g. Dr., Prof., Mr., Ms., Doctor, Lecturer), staff names, contact details, email addresses, phone numbers, room numbers (e.g. N3-04, N3-01), building names, class times, days, (P), (T), practical session markers, or table headings (PROFILE, SUBJECTS, CALCULATIONS, LECTURER, TIMETABLE) as subjects or inside subject names.
 4. CREDIT EXTRACTION & PRIORITY:
-   - Priority 1: If explicit credit is stated in text, use that exact numeric credit.
-   - Priority 2: If explicit credit is missing, use the LAST DIGIT of the module number as the credit value.
-   - ZERO CREDIT IS VALID: 0 is a completely valid credit value.
-   - If credit cannot be determined, set "credit": null.
-5. PRESERVE MODULE NUMBERS: Preserve complete module numbers exactly as written.`;
+   - Use explicitly stated credits only. Never infer credits from module codes.
+   - Preserve zero credits. Output null when credits are absent so the user can review.
+5. DE-DUPLICATE MODULES: If the same module code appears multiple times in a timetable or document (due to practicals, groups, or days), create ONLY ONE subject entry in the subjects list.`;
 
       let messagesPayload: any[] = [{ role: 'system', content: systemPrompt }];
 

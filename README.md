@@ -62,3 +62,7 @@ Serverless deployments require Supabase for profile creation.
 
 The SQL migration requires access to your Supabase project and is not applied by
 `npm run build` or `npm test`.
+
+## Import review
+
+Imports preserve module codes and semester assignments. Review each subject?s semester and credits before publishing. Missing credits remain blank and must be entered; module-code digits are not used to guess credits. The local text parser works without an AI API key.

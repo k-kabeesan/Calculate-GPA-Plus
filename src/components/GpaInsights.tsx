@@ -1,3 +1,4 @@
+import { validTargetInputs } from '../utils/gpa';
 import React, { useState, useMemo } from 'react';
 import {
   Award,
@@ -66,13 +67,17 @@ export const GpaInsights: React.FC<GpaInsightsProps> = ({
 
   // 3. Target GPA Mathematical Calculation
   const targetResult = useMemo(() => {
-    const cGpa = parseFloat(customCurrentGpa);
-    const cCred = parseFloat(customCompletedCredits);
-    const tGpa = parseFloat(targetGpaInput);
-    const fCred = parseFloat(futureCreditsInput);
+    const cGpa = Number(customCurrentGpa);
+    const cCred = Number(customCompletedCredits);
+    const tGpa = Number(targetGpaInput);
+    const fCred = Number(futureCreditsInput);
 
-    if (isNaN(cGpa) || isNaN(cCred) || isNaN(tGpa) || isNaN(fCred)) {
+    if (!validTargetInputs([customCurrentGpa, customCompletedCredits, targetGpaInput, futureCreditsInput], maxGradePoint)) {
       return { status: 'invalid', message: 'Please enter valid positive numbers for all fields.' };
+    }
+
+    if (cGpa < 0 || cGpa > maxGradePoint || cCred < 0 || maxGradePoint <= 0) {
+      return { status: 'invalid', message: 'Enter a current GPA within the grading scale and nonnegative completed credits.' };
     }
 
     if (fCred <= 0) {

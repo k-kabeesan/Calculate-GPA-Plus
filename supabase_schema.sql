@@ -113,8 +113,8 @@ DROP POLICY IF EXISTS "Public grading scales update access" ON public.grading_sc
 
 DROP POLICY IF EXISTS "Public grading scales delete access" ON public.grading_scales;
 
--- Enable Row Level Security (RLS) and grant SELECT access to anon & authenticated for public profiles
-GRANT SELECT ON TABLE public.profiles, public.semesters, public.subjects, public.grading_scales TO anon, authenticated;
+-- Enable Row Level Security (RLS) and grant SELECT and INSERT access to anon & authenticated for public profiles
+GRANT SELECT, INSERT ON TABLE public.profiles, public.semesters, public.subjects, public.grading_scales TO anon, authenticated;
 GRANT ALL ON TABLE public.profiles, public.semesters, public.subjects, public.grading_scales TO service_role;
 GRANT USAGE, SELECT ON SEQUENCE public.semesters_id_seq, public.subjects_id_seq, public.grading_scales_id_seq TO anon, authenticated, service_role;
 
@@ -123,20 +123,41 @@ CREATE POLICY "Public profiles select policy" ON public.profiles
   FOR SELECT TO anon, authenticated
   USING (visibility = 'public');
 
+DROP POLICY IF EXISTS "Public profiles insert policy" ON public.profiles;
+CREATE POLICY "Public profiles insert policy" ON public.profiles
+  FOR INSERT TO anon, authenticated
+  WITH CHECK (true);
+
 DROP POLICY IF EXISTS "Public semesters select policy" ON public.semesters;
 CREATE POLICY "Public semesters select policy" ON public.semesters
   FOR SELECT TO anon, authenticated
   USING (true);
+
+DROP POLICY IF EXISTS "Public semesters insert policy" ON public.semesters;
+CREATE POLICY "Public semesters insert policy" ON public.semesters
+  FOR INSERT TO anon, authenticated
+  WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Public subjects select policy" ON public.subjects;
 CREATE POLICY "Public subjects select policy" ON public.subjects
   FOR SELECT TO anon, authenticated
   USING (true);
 
+DROP POLICY IF EXISTS "Public subjects insert policy" ON public.subjects;
+CREATE POLICY "Public subjects insert policy" ON public.subjects
+  FOR INSERT TO anon, authenticated
+  WITH CHECK (true);
+
 DROP POLICY IF EXISTS "Public grading scales select policy" ON public.grading_scales;
 CREATE POLICY "Public grading scales select policy" ON public.grading_scales
   FOR SELECT TO anon, authenticated
   USING (true);
+
+DROP POLICY IF EXISTS "Public grading scales insert policy" ON public.grading_scales;
+CREATE POLICY "Public grading scales insert policy" ON public.grading_scales
+  FOR INSERT TO anon, authenticated
+  WITH CHECK (true);
+
 
 -- One RPC call is one PostgreSQL transaction. Any validation or insert failure
 -- rolls back profile metadata, deletions, and all replacement rows together.

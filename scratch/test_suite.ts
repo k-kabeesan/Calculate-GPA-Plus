@@ -1,3 +1,4 @@
+import { normalizeImportedProfile } from '../src/utils/profileImport';
 import {
   calculateSemesterGPA,
   calculateProfileCGPA,
@@ -107,22 +108,11 @@ assert(
 );
 
 // 5. Final-digit Credit Rule & Module Code Preservation
-console.log('\n--- 5. Final-Digit Credit Rule ---');
-function applyFinalDigitRule(moduleCode: string, explicitCredit?: number | null): number | null {
-  if (explicitCredit !== undefined && explicitCredit !== null) return explicitCredit;
-  const digits = moduleCode.match(/\d/g);
-  if (digits && digits.length > 0) {
-    const last = parseInt(digits[digits.length - 1], 10);
-    if (!isNaN(last)) return last;
-  }
-  return null;
-}
-
-assert(applyFinalDigitRule('NANO2112') === 2, 'NANO2112 resolves to credit 2 via last digit');
-assert(applyFinalDigitRule('NANO2151') === 1, 'NANO2151 resolves to credit 1 via last digit');
-assert(applyFinalDigitRule('ETCH1210') === 0, 'ETCH1210 resolves to valid credit 0 via last digit');
-assert(applyFinalDigitRule('PDEV1210') === 0, 'PDEV1210 resolves to valid credit 0 via last digit');
-assert(applyFinalDigitRule('NANO2112', 3) === 3, 'Explicit credit takes priority over last digit');
+console.log('\n--- 5. Explicit Credit Handling ---');
+const importedCredit = (credit?: number) => normalizeImportedProfile({ subjects: [{ moduleCode: 'CS101', subjectName: 'Course', credit }] }).subjects[0].credit;
+assert(importedCredit() === null, 'Missing credits require review');
+assert(importedCredit(0) === 0, 'Explicit zero credit is preserved');
+assert(importedCredit(3) === 3, 'Explicit credit is preserved despite code ending');
 
 // 6. Target GPA Calculation & Impossibility Boundaries
 console.log('\n--- 6. Target GPA Calculation ---');

@@ -115,6 +115,20 @@ export const ProfileViewerPage: React.FC<ProfileViewerPageProps> = ({
           <AlertCircle className="w-5 h-5 shrink-0" />
           <span>{error || 'Profile not found.'}</span>
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            setLoading(true);
+            setError('');
+            fetchProfileById(profileId)
+              .then((data: Profile) => setProfile(data))
+              .catch((err: any) => setError(formatErrorMessage(err, 'Unable to load profile. Please verify the link or ID.')))
+              .finally(() => setLoading(false));
+          }}
+          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors"
+        >
+          Retry
+        </button>
       </div>
     );
   }

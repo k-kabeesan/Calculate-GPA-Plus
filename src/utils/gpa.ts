@@ -100,3 +100,9 @@ export function calculateProfileCGPA(semesters: Semester[], scale: GradeOption[]
     total_subjects: totalSubjects
   };
 }
+
+export function validTargetInputs(values: string[], max: number): boolean {
+  if (values.length !== 4 || values.some(v => !v.trim()) || !Number.isFinite(max) || max <= 0) return false;
+  const [current, credits, target, future] = values.map(Number);
+  return [current, credits, target, future].every(Number.isFinite) && current >= 0 && current <= max && credits >= 0 && target >= 0 && target <= max && future > 0;
+}

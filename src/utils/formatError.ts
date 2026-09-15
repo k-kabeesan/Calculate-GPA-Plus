@@ -10,36 +10,69 @@ export function formatErrorMessage(err: unknown, fallbackMessage = 'Unable to co
 
   if (typeof err === 'string') {
     const trimmed = err.trim();
-    if (trimmed && !trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+    if (trimmed && trimmed !== '[object Object]' && !trimmed.startsWith('{') && !trimmed.startsWith('[')) {
       return trimmed;
     }
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object') {
+        return formatErrorMessage(parsed, fallbackMessage);
+      }
+    } catch {}
   }
 
   if (err instanceof Error) {
     if (err.message && typeof err.message === 'string') {
       const msg = err.message.trim();
-      if (msg && !msg.startsWith('{') && !msg.startsWith('[')) {
+      if (msg && msg !== '[object Object]' && !msg.startsWith('{') && !msg.startsWith('[')) {
         return msg;
       }
+      try {
+        const parsed = JSON.parse(msg);
+        if (parsed && typeof parsed === 'object') {
+          return formatErrorMessage(parsed, fallbackMessage);
+        }
+      } catch {}
     }
   }
 
   if (typeof err === 'object') {
     const anyErr = err as Record<string, any>;
 
-    if (anyErr.error && typeof anyErr.error === 'string') {
-      return anyErr.error.trim();
+    // Handle Supabase / PostgREST error objects
+    if (anyErr.message && typeof anyErr.message === 'string' && anyErr.message.trim() && anyErr.message !== '[object Object]') {
+      const msg = anyErr.message.trim();
+      if (anyErr.details && typeof anyErr.details === 'string' && anyErr.details.trim()) {
+        return `${msg} (${anyErr.details.trim()})`;
+      }
+      if (anyErr.hint && typeof anyErr.hint === 'string' && anyErr.hint.trim()) {
+        return `${msg} - Hint: ${anyErr.hint.trim()}`;
+      }
+      return msg;
     }
-    if (anyErr.message && typeof anyErr.message === 'string') {
-      return anyErr.message.trim();
+
+    if (anyErr.error) {
+      if (typeof anyErr.error === 'string' && anyErr.error.trim() && anyErr.error !== '[object Object]') {
+        return anyErr.error.trim();
+      }
+      if (typeof anyErr.error === 'object') {
+        return formatErrorMessage(anyErr.error, fallbackMessage);
+      }
     }
-    if (anyErr.details && typeof anyErr.details === 'string') {
+
+    if (anyErr.details && typeof anyErr.details === 'string' && anyErr.details.trim() && anyErr.details !== '[object Object]') {
       return anyErr.details.trim();
     }
-    if (anyErr.statusText && typeof anyErr.statusText === 'string') {
-      return anyErr.statusText.trim();
+
+    if (anyErr.statusText && typeof anyErr.statusText === 'string' && anyErr.statusText.trim()) {
+      return `HTTP ${anyErr.status || ''}: ${anyErr.statusText.trim()}`.trim();
+    }
+
+    if (anyErr.status && typeof anyErr.status === 'number') {
+      return `Server returned error status ${anyErr.status}.`;
     }
   }
 
   return fallbackMessage;
 }
+
