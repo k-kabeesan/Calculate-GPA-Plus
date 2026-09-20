@@ -1,7 +1,7 @@
 import { normalizeImportedProfile } from '../utils/profileImport';
 import type { Profile, GradeOption, Semester } from '../types';
 import { formatErrorMessage } from '../utils/formatError';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 const globalProcess = (typeof globalThis !== 'undefined' && (globalThis as any).process) ? (globalThis as any).process.env : {};
 const env = (typeof import.meta !== 'undefined' && (import.meta as any).env) ? (import.meta as any).env : globalProcess;
@@ -10,33 +10,10 @@ const env = (typeof import.meta !== 'undefined' && (import.meta as any).env) ? (
 export const apiBase = (env.VITE_API_URL || '').replace(/\/+$/, '');
 export const isSupabaseConfigured = true;
 
-const supabaseUrl =
-  env.VITE_SUPABASE_URL ||
-  env.SUPABASE_URL ||
-  env.NEXT_PUBLIC_SUPABASE_URL ||
-  env.SUPAB_URL ||
-  env.VITE_URL ||
-  '';
-
-const supabaseAnonKey =
-  env.VITE_SUPABASE_ANON_KEY ||
-  env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-  env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-  env.SUPABASE_SERVICE_ROLE_KEY ||
-  env.SUPABASE_KEY ||
-  env.SUPAB_KEY ||
-  env.VITE_SUPABASE_KEY ||
-  env.VITE_KEY ||
-  '';
-
-let clientSupabase: SupabaseClient | null = null;
-if (supabaseUrl && supabaseAnonKey) {
-  try {
-    clientSupabase = createClient(supabaseUrl, supabaseAnonKey);
-  } catch (err) {
-    console.warn('Client Supabase initialization failed:', err);
-  }
-}
+// Shared-profile reads and writes go through the API. Never initialize Supabase
+// in browser code: service credentials must remain server-only, and direct
+// table access would make password-hash fields reachable from the client.
+const clientSupabase: SupabaseClient | null = null;
 
 // Generate permanent unique Profile ID (e.g. GPA-N301-A82F91)
 export function generateProfileId(): string {

@@ -8,6 +8,7 @@
     "server": "tsx server/index.ts",
     "client": "vite",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --pretty false",
     "preview": "vite preview",
     "test": "tsx scratch/test_suite.ts && tsx scratch/test_regressions.ts"
   },

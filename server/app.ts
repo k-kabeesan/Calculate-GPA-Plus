@@ -52,7 +52,23 @@ function generateProfileId(): string {
 // Hash passcode helper
 function hashPasscode(passcode: string): string {
   if (!passcode) return '';
-  return crypto.createHash('sha256').update(passcode).digest('hex');
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = crypto.scryptSync(passcode, salt, 64).toString('hex');
+  return `scrypt$${salt}$${derived}`;
+}
+
+function verifyPasscode(passcode: string, storedHash: string): boolean {
+  if (!storedHash) return true;
+  if (storedHash.startsWith('scrypt$')) {
+    const [, salt, expectedHex] = storedHash.split('$');
+    if (!salt || !expectedHex) return false;
+    const actual = crypto.scryptSync(passcode, salt, 64);
+    const expected = Buffer.from(expectedHex, 'hex');
+    return expected.length === actual.length && crypto.timingSafeEqual(actual, expected);
+  }
+  const actual = Buffer.from(crypto.createHash('sha256').update(passcode).digest('hex'), 'hex');
+  const expected = Buffer.from(storedHash, 'hex');
+  return expected.length === actual.length && crypto.timingSafeEqual(actual, expected);
 }
 
 // Default grading scale
@@ -588,21 +604,21 @@ app.post(['/api/profiles/:id/verify-passcode', '/profiles/:id/verify-passcode'],
   try {
     const profileId = (req.params.id as string).toUpperCase();
     const { passcode } = req.body;
-    const hashed = hashPasscode(passcode || '');
+    const inputPasscode = String(passcode || '');
 
     const profile = isSupabaseConfigured ? null : db.prepare('SELECT passcode_hash FROM profiles WHERE id = ?').get(profileId) as any;
     if (profile) {
       if (!profile.passcode_hash) {
         return res.json({ success: true, valid: true });
       }
-      if (hashed === profile.passcode_hash) {
+      if (verifyPasscode(inputPasscode, profile.passcode_hash)) {
         return res.json({ success: true, valid: true });
       } else {
         return res.status(401).json({ success: false, valid: false, error: 'Incorrect owner passcode.' });
       }
     }
 
-    const supaCheck = await verifySupabasePasscode(profileId, hashed);
+    const supaCheck = await verifySupabasePasscode(profileId, inputPasscode);
     if (supaCheck.exists) {
       if (supaCheck.valid) {
         return res.json({ success: true, valid: true });
@@ -634,15 +650,15 @@ app.put(['/api/profiles/:id', '/profiles/:id'], async (req: Request, res: Respon
       gradingScale = DEFAULT_GRADING_SCALE
     } = req.body;
 
-    const hashedInput = hashPasscode(passcode || '');
+    const inputPasscode = String(passcode || '');
     const existing = isSupabaseConfigured ? null : db.prepare('SELECT passcode_hash FROM profiles WHERE id = ?').get(profileId) as any;
 
     if (existing) {
-      if (existing.passcode_hash && hashedInput !== existing.passcode_hash) {
+      if (existing.passcode_hash && !verifyPasscode(inputPasscode, existing.passcode_hash)) {
         return res.status(401).json({ success: false, error: 'Unauthorized. Invalid owner passcode.' });
       }
     } else {
-      const supaCheck = await verifySupabasePasscode(profileId, hashedInput);
+      const supaCheck = await verifySupabasePasscode(profileId, inputPasscode);
       if (!supaCheck.exists) {
         return res.status(404).json({ success: false, error: 'Profile not found' });
       }
@@ -741,14 +757,13 @@ app.delete(['/api/profiles/:id', '/profiles/:id'], async (req: Request, res: Res
 
     const existing = isSupabaseConfigured ? null : db.prepare('SELECT passcode_hash FROM profiles WHERE id = ?').get(profileId) as any;
     if (!existing) {
-      const check = await verifySupabasePasscode(profileId, hashPasscode(passcode || ''));
+      const check = await verifySupabasePasscode(profileId, String(passcode || ''));
       if (!check.exists) return res.status(404).json({ success: false, error: 'Profile not found' });
       if (!check.valid) return res.status(401).json({ success: false, error: 'Unauthorized. Invalid owner passcode.' });
     }
 
     if (existing && existing.passcode_hash) {
-      const hashedInput = hashPasscode(passcode || '');
-      if (hashedInput !== existing.passcode_hash) {
+      if (!verifyPasscode(String(passcode || ''), existing.passcode_hash)) {
         return res.status(401).json({ success: false, error: 'Unauthorized. Invalid owner passcode.' });
       }
     }

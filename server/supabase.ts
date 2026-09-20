@@ -1,24 +1,12 @@
+import './env';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import crypto from 'node:crypto';
 
 // Server-side environment variable resolution (keeps all secret keys on server only)
-const supabaseUrl =
-  process.env.SUPABASE_URL ||
-  process.env.VITE_SUPABASE_URL ||
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  process.env.SUPAB_URL ||
-  process.env.VITE_URL ||
-  '';
-
-const supabaseKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.VITE_SUPABASE_ANON_KEY ||
-  process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-  process.env.SUPABASE_KEY ||
-  process.env.SUPAB_KEY ||
-  process.env.VITE_SUPABASE_KEY ||
-  process.env.VITE_KEY ||
-  '';
+// Only server-side names are accepted here. A VITE_/NEXT_PUBLIC_ value can be
+// shipped to the browser, so accepting one as a server credential is unsafe.
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 // A partially configured cloud backend must fail instead of silently saving locally.
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseKey);
 
@@ -421,7 +409,20 @@ export async function deleteSupabaseProfile(profileId: string): Promise<boolean>
   return true;
 }
 
-export async function verifySupabasePasscode(profileId: string, inputHash: string): Promise<{ exists: boolean; valid: boolean }> {
+function verifyStoredPasscode(passcode: string, storedHash: string): boolean {
+  if (!storedHash) return true;
+  if (storedHash.startsWith('scrypt$')) {
+    const [, salt, expectedHex] = storedHash.split('$');
+    if (!salt || !expectedHex) return false;
+    const actual = crypto.scryptSync(passcode, salt, 64);
+    const expected = Buffer.from(expectedHex, 'hex');
+    return expected.length === actual.length && crypto.timingSafeEqual(actual, expected);
+  }
+  const actual = crypto.createHash('sha256').update(passcode).digest('hex');
+  return actual === storedHash;
+}
+
+export async function verifySupabasePasscode(profileId: string, passcode: string): Promise<{ exists: boolean; valid: boolean }> {
   const client = getSupabaseClient();
   if (!client) return { exists: false, valid: false };
 
@@ -435,7 +436,7 @@ export async function verifySupabasePasscode(profileId: string, inputHash: strin
     if (error || !data) return { exists: false, valid: false };
     const hash = data.password_hash || data.passcode_hash || '';
     if (!hash) return { exists: true, valid: true };
-    return { exists: true, valid: hash === inputHash };
+    return { exists: true, valid: verifyStoredPasscode(passcode, hash) };
   } catch {
     return { exists: false, valid: false };
   }

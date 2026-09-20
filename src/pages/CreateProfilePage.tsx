@@ -36,11 +36,13 @@ interface FormSemester {
 interface CreateProfilePageProps {
   onProfileCreated: (profileId: string) => void;
   initialSubjects?: Subject[];
+  initialGradingScale?: GradeOption[];
 }
 
 export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
   onProfileCreated,
-  initialSubjects
+  initialSubjects,
+  initialGradingScale = DEFAULT_GRADING_SCALE
 }) => {
   const [step, setStep] = useState(1);
 
@@ -84,7 +86,7 @@ export const CreateProfilePage: React.FC<CreateProfilePageProps> = ({
   ]);
 
   // Grading scale state
-  const [gradingScale, setGradingScale] = useState<GradeOption[]>(DEFAULT_GRADING_SCALE);
+  const [gradingScale, setGradingScale] = useState<GradeOption[]>(initialGradingScale);
   const [isScaleModalOpen, setIsScaleModalOpen] = useState(false);
 
   // Status & Created State

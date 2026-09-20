@@ -4,7 +4,7 @@ import { createProfile, updateProfile, deleteProfile, verifyOwnerPasscode } from
 globalThis.fetch = async () => new Response('<html>Not found</html>', {
   status: 404, headers: { 'content-type': 'text/html' }
 });
-const profile = { profile_name: 'Test', university: 'U', faculty: 'F', semesters: [] };
+const profile = { profile_name: 'Test', university: 'U', faculty: 'F', passcode: 'secret', semesters: [] };
 await assert.rejects(createProfile(profile), /HTML/);
 await assert.rejects(updateProfile('GPA-TEST', 'secret', profile), /HTML/);
 await assert.rejects(deleteProfile('GPA-TEST', 'secret'), /HTML/);

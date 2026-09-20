@@ -42,6 +42,25 @@ Static-only hosting needs a separately hosted API configured with `VITE_API_URL`
 Run `npm test` for calculation and regression checks, and `npm run build` for the production build.
 The regression suite mocks cloud requests and does not modify the live database.
 
+`npm run typecheck` runs the TypeScript production check without emitting files.
+
+## Deployment
+
+The repository is configured for Vercel with the Vite build output and `/api`
+serverless routes. In Vercel, set these server-only variables:
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `OPENROUTER_API_KEY` (optional, for AI extraction)
+- `OPENROUTER_VISION_MODEL` and `OPENROUTER_API_URL` (optional overrides)
+
+Never use `VITE_` or `NEXT_PUBLIC_` prefixes for Supabase service credentials.
+The browser calls the API for profile reads, writes, passcode verification, and
+deletion; it never connects directly to Supabase or receives password hashes.
+After adding the variables, run `npm run build` locally and deploy the same
+repository to Vercel. The Supabase schema in `supabase_schema.sql` must be
+applied before creating production profiles.
+
 ## Supabase setup and upgrade
 
 1. Run the entire [supabase_schema.sql](supabase_schema.sql) in the Supabase SQL Editor.
