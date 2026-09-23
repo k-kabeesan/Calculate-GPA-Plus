@@ -1,5 +1,6 @@
 # Dependencies
 node_modules
+.npm-cache
 .pnpm-store
 
 # Production build outputs
@@ -34,4 +35,3 @@ yarn-error.log*
 scratch/*
 !scratch/test_suite.ts
 !scratch/test_regressions.ts
-!scratch/test_static_host_fallback.ts

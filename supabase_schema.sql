@@ -23,6 +23,11 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS search_text TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS semester_names TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS semester_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS subject_count INTEGER NOT NULL DEFAULT 0;
+
 -- Indexes for ultra-fast filtering & searching
 CREATE INDEX IF NOT EXISTS idx_profiles_id ON public.profiles(id);
 CREATE INDEX IF NOT EXISTS idx_profiles_name ON public.profiles(profile_name);
@@ -49,7 +54,8 @@ CREATE TABLE IF NOT EXISTS public.subjects (
   subject_code TEXT DEFAULT '',
   module_number TEXT DEFAULT '',
   subject_name TEXT NOT NULL,
-  credit NUMERIC NOT NULL
+  credit NUMERIC NOT NULL,
+  selected_grade TEXT DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_subjects_semester_id ON public.subjects(semester_id);
@@ -68,9 +74,11 @@ CREATE INDEX IF NOT EXISTS idx_grading_scales_profile_id ON public.grading_scale
 -- Safe Migration for existing Supabase projects
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS profile_id TEXT DEFAULT '';
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS department TEXT DEFAULT '';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS degree TEXT DEFAULT '';
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS password_hash TEXT DEFAULT '';
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS passcode_hash TEXT DEFAULT '';
 ALTER TABLE public.subjects ADD COLUMN IF NOT EXISTS module_number TEXT DEFAULT '';
+ALTER TABLE public.subjects ADD COLUMN IF NOT EXISTS selected_grade TEXT DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS idx_profiles_department ON public.profiles(department);
 
@@ -114,48 +122,49 @@ DROP POLICY IF EXISTS "Public grading scales update access" ON public.grading_sc
 DROP POLICY IF EXISTS "Public grading scales delete access" ON public.grading_scales;
 
 -- Enable Row Level Security (RLS) and grant SELECT and INSERT access to anon & authenticated for public profiles
-GRANT SELECT, INSERT ON TABLE public.profiles, public.semesters, public.subjects, public.grading_scales TO anon, authenticated;
 GRANT ALL ON TABLE public.profiles, public.semesters, public.subjects, public.grading_scales TO service_role;
-GRANT USAGE, SELECT ON SEQUENCE public.semesters_id_seq, public.subjects_id_seq, public.grading_scales_id_seq TO anon, authenticated, service_role;
+REVOKE ALL ON TABLE public.profiles, public.semesters, public.subjects, public.grading_scales FROM anon, authenticated;
+GRANT USAGE, SELECT ON SEQUENCE public.semesters_id_seq, public.subjects_id_seq, public.grading_scales_id_seq TO service_role;
+REVOKE ALL ON SEQUENCE public.semesters_id_seq, public.subjects_id_seq, public.grading_scales_id_seq FROM anon, authenticated;
 
 DROP POLICY IF EXISTS "Public profiles select policy" ON public.profiles;
 CREATE POLICY "Public profiles select policy" ON public.profiles
-  FOR SELECT TO anon, authenticated
-  USING (visibility = 'public');
+  FOR SELECT TO service_role
+  USING (true);
 
 DROP POLICY IF EXISTS "Public profiles insert policy" ON public.profiles;
 CREATE POLICY "Public profiles insert policy" ON public.profiles
-  FOR INSERT TO anon, authenticated
+  FOR INSERT TO service_role
   WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Public semesters select policy" ON public.semesters;
 CREATE POLICY "Public semesters select policy" ON public.semesters
-  FOR SELECT TO anon, authenticated
+  FOR SELECT TO service_role
   USING (true);
 
 DROP POLICY IF EXISTS "Public semesters insert policy" ON public.semesters;
 CREATE POLICY "Public semesters insert policy" ON public.semesters
-  FOR INSERT TO anon, authenticated
+  FOR INSERT TO service_role
   WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Public subjects select policy" ON public.subjects;
 CREATE POLICY "Public subjects select policy" ON public.subjects
-  FOR SELECT TO anon, authenticated
+  FOR SELECT TO service_role
   USING (true);
 
 DROP POLICY IF EXISTS "Public subjects insert policy" ON public.subjects;
 CREATE POLICY "Public subjects insert policy" ON public.subjects
-  FOR INSERT TO anon, authenticated
+  FOR INSERT TO service_role
   WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Public grading scales select policy" ON public.grading_scales;
 CREATE POLICY "Public grading scales select policy" ON public.grading_scales
-  FOR SELECT TO anon, authenticated
+  FOR SELECT TO service_role
   USING (true);
 
 DROP POLICY IF EXISTS "Public grading scales insert policy" ON public.grading_scales;
 CREATE POLICY "Public grading scales insert policy" ON public.grading_scales
-  FOR INSERT TO anon, authenticated
+  FOR INSERT TO service_role
   WITH CHECK (true);
 
 
@@ -183,9 +192,9 @@ BEGIN
     RAISE EXCEPTION 'Invalid visibility';
   END IF;
   IF p_create THEN
-    INSERT INTO public.profiles (id, profile_id, profile_name, university, faculty, passcode_hash, password_hash)
+    INSERT INTO public.profiles (id, profile_id, profile_name, university, faculty, degree, passcode_hash, password_hash)
     VALUES (p_id, p_id, btrim(p_data->>'profile_name'), '', '',
-      coalesce(p_data->>'passcode_hash', ''), coalesce(p_data->>'passcode_hash', ''));
+      coalesce(p_data->>'degree', ''), coalesce(p_data->>'passcode_hash', ''), coalesce(p_data->>'passcode_hash', ''));
   ELSE
     PERFORM 1 FROM public.profiles WHERE id = p_id FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'Profile not found'; END IF;
@@ -196,6 +205,7 @@ BEGIN
     university = coalesce(btrim(p_data->>'university'), ''),
     faculty = coalesce(btrim(p_data->>'faculty'), ''),
     department = coalesce(btrim(p_data->>'department'), ''),
+    degree = coalesce(btrim(p_data->>'degree'), ''),
     academic_year = coalesce(btrim(p_data->>'academic_year'), ''),
     description = coalesce(btrim(p_data->>'description'), ''),
     visibility = coalesce(p_data->>'visibility', 'public'),
@@ -215,8 +225,8 @@ BEGIN
          OR coalesce(btrim(sub->>'subject_name'), '') = '' THEN
         RAISE EXCEPTION 'Invalid subject name or credit';
       END IF;
-      INSERT INTO public.subjects (semester_id, subject_code, module_number, subject_name, credit)
-      VALUES (sem_id, coalesce(sub->>'subject_code', ''), coalesce(sub->>'subject_code', ''), btrim(sub->>'subject_name'), credit_value);
+      INSERT INTO public.subjects (semester_id, subject_code, module_number, subject_name, credit, selected_grade)
+      VALUES (sem_id, coalesce(sub->>'subject_code', ''), coalesce(sub->>'subject_code', ''), btrim(sub->>'subject_name'), credit_value, coalesce(sub->>'selected_grade', ''));
     END LOOP;
   END LOOP;
   FOR gs IN SELECT value FROM jsonb_array_elements(coalesce(p_data->'gradingScale', '[]'::jsonb)) LOOP
@@ -228,9 +238,27 @@ BEGIN
     INSERT INTO public.grading_scales (profile_id, grade, grade_point)
     VALUES (p_id, btrim(gs->>'grade'), grade_value);
   END LOOP;
+  UPDATE public.profiles SET
+    search_text = concat_ws(' ', profile_name, university, faculty, department, degree, academic_year, p_id,
+      (SELECT string_agg(concat_ws(' ', sub.subject_code, sub.subject_name), ' ')
+       FROM public.subjects sub JOIN public.semesters sem ON sem.id = sub.semester_id
+       WHERE sem.profile_id = p_id)),
+    semester_names = coalesce((SELECT string_agg(semester_name, ' ') FROM public.semesters WHERE profile_id = p_id), ''),
+    semester_count = (SELECT count(*) FROM public.semesters WHERE profile_id = p_id),
+    subject_count = (SELECT count(*) FROM public.subjects sub JOIN public.semesters sem ON sem.id = sub.semester_id WHERE sem.profile_id = p_id)
+  WHERE id = p_id;
 END;
 $$;
 REVOKE ALL ON FUNCTION public.save_gpa_profile(text, jsonb, boolean) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.save_gpa_profile(text, jsonb, boolean) TO service_role;
+
+-- Populate the search columns for profiles created before this migration.
+UPDATE public.profiles p SET
+  search_text = concat_ws(' ', p.profile_name, p.university, p.faculty, p.department, p.degree, p.academic_year, p.id,
+    (SELECT string_agg(concat_ws(' ', sub.subject_code, sub.subject_name), ' ')
+     FROM public.subjects sub JOIN public.semesters sem ON sem.id = sub.semester_id WHERE sem.profile_id = p.id)),
+  semester_names = coalesce((SELECT string_agg(semester_name, ' ') FROM public.semesters WHERE profile_id = p.id), ''),
+  semester_count = (SELECT count(*) FROM public.semesters WHERE profile_id = p.id),
+  subject_count = (SELECT count(*) FROM public.subjects sub JOIN public.semesters sem ON sem.id = sub.semester_id WHERE sem.profile_id = p.id);
 
 COMMIT;

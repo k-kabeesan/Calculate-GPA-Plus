@@ -3,85 +3,94 @@
 **Calculate GPA Plus** is a fast, responsive web application for calculating semester GPA and overall Cumulative GPA (CGPA).
 
 ## Features
-- **Normal GPA Calculator**: Instant standalone calculator without account creation.
-- **Shared GPA Profiles**: Create reusable academic profiles with fixed course modules & credit values.
-- **Academic Honors Classification**: Automatically computes First Class, Second Class Upper, Second Class Lower, and Pass standings.
-- **Minimalist PDF Transcript Export**: Clean one-page academic results export.
-- **Supabase Cloud Database**: Permanent online storage for public shared profiles.
+
+- **Normal GPA Calculator:** Calculate a semester GPA instantly without creating an account. Credits and grade points use an editable grading scale.
+- **Shared GPA Profiles:** Create reusable public academic profiles with fixed course modules and credit values across multiple semesters; calculate CGPA from them.
+- **Academic Honors Classification:** Automatically show First Class (≥ 3.70), Second Class Upper (≥ 3.30), Second Class Lower (≥ 3.00), or Pass.
+- **PDF Transcript Export:** Download a clean academic results report. Short reports fit on one page; longer reports continue onto additional pages.
+- **Supabase Cloud Database:** Store public shared profiles online.
+- Grade insights and a target GPA planner for future credits.
+- Public profiles with university, faculty, optional department, degree, semesters, module codes, credits, and optional saved grades.
+- Server verified owner passcodes for editing and deletion.
+- Search by profile, university, faculty, department, degree, academic year, semester, or module text, with paging.
+- Pasted text, PDF, and image module import with editable credits and grade review. Credits are never inferred from module codes.
+
+The Auto Profile Generator extracts modules in the browser using PDF text extraction and local OCR. It does not require an AI API key.
 
 ## Developer & Creator
-Created by **K.Kabeesan**
+
+Created by **K.Kabeesan**.
+
 - Instagram: [@K_KABEESAN](https://www.instagram.com/K_KABEESAN)
 - Facebook: [K.Kabeesan](https://www.facebook.com/share/1CTH7Bg4ri/)
 - LinkedIn: [K.Kabeesan](https://www.linkedin.com/in/k-kabeesan-9b1917394/)
 
 ## Tech Stack
-- **Frontend**: React 19, Vite, TypeScript, Tailwind CSS, Lucide Icons, jsPDF
-- **Database & Cloud**: Supabase PostgreSQL (`@supabase/supabase-js`)
-- **Local Fallback**: Node.js Express API + SQLite (`better-sqlite3`)
 
-## License
-MIT License © 2026 Calculate GPA Plus - Created by K.Kabeesan.
+- **Frontend:** React 19, Vite, TypeScript, CSS, Lucide Icons, jsPDF.
+- **Database & Cloud:** Supabase PostgreSQL (`@supabase/supabase-js`).
+- **API:** Node.js and Express, hosted as Vercel Functions in production. The standalone calculator works without database access.
 
+## Architecture
 
-## Local development
+`src/domain` contains pure GPA and import rules. `src/pages` and `src/components` render the React interface. `src/services/api.ts` calls the Express API. `server/validation.ts` validates writes; `server/security.ts` handles passcode hashes; `server/repository.ts` is the sole Supabase adapter. `server/app.ts` exposes a consistent JSON API. `api/` forwards Vercel functions to the same Express app.
 
-Install Node.js and run:
+Supabase PostgreSQL is the only profile database. Profile saves call `save_gpa_profile`, which writes a profile and all child rows in one PostgreSQL transaction. The browser never receives the service role key or a passcode hash. A temporary calculator/import draft may be held in session storage until the user creates a profile.
+
+## Local setup
+
+Use a current Node.js version, then:
 
 ```sh
 npm install
+cp .env.example .env
 npm run dev
 ```
 
-The frontend runs on port 5173 and proxies API requests to Express on port 5000.
-Without Supabase configuration, the local Express server uses SQLite. Shared
-profile creation, editing, deletion, and passcode verification require a working
-API. Browser storage is only a read cache; failed writes are reported as errors.
-Static-only hosting needs a separately hosted API configured with `VITE_API_URL`.
+On PowerShell, use `Copy-Item .env.example .env` and `npm.cmd` if `npm` script execution is disabled. The client runs at `http://localhost:5173`, with API proxying to Express on port 5000. The standalone calculator runs without Supabase; profile features require both environment variables below and the SQL migration.
 
-Run `npm test` for calculation and regression checks, and `npm run build` for the production build.
-The regression suite mocks cloud requests and does not modify the live database.
+| Variable | Scope | Purpose |
+| --- | --- | --- |
+| `SUPABASE_URL` | Server only | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server only | A Supabase secret key (`sb_secret_...`) or legacy `service_role` key for database access |
+| `VITE_API_URL` | Browser, optional | API origin when hosted separately |
+| `CLIENT_ORIGIN` | Server, optional | Allowed browser origin for a separately hosted frontend |
 
-`npm run typecheck` runs the TypeScript production check without emitting files.
+Keep `.env` out of version control. Set the first two variables in Vercel's server environment. Do not use `VITE_` for private credentials.
 
-## Deployment
+## Supabase migration
 
-The repository is configured for Vercel with the Vite build output and `/api`
-serverless routes. In Vercel, set these server-only variables:
+Run [supabase_schema.sql](supabase_schema.sql) in the Supabase SQL editor. On an existing project, back up the database first, then run the script to update existing tables and the transactional save function. It backfills searchable text for existing profiles and removes anonymous table permissions. Existing profiles with no stored owner hash remain readable but require administrator help to manage. Existing SHA-256 owner hashes remain verifiable; new profiles use scrypt.
 
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `OPENROUTER_API_KEY` (optional, for AI extraction)
-- `OPENROUTER_VISION_MODEL` and `OPENROUTER_API_URL` (optional overrides)
+## API
 
-Never use `VITE_` or `NEXT_PUBLIC_` prefixes for Supabase service credentials.
-The browser calls the API for profile reads, writes, passcode verification, and
-deletion; it never connects directly to Supabase or receives password hashes.
-After adding the variables, run `npm run build` locally and deploy the same
-repository to Vercel. The Supabase schema in `supabase_schema.sql` must be
-applied before creating production profiles.
+All endpoints respond with `{ success: true, data }` or `{ success: false, error: { code, message } }`.
 
-## Supabase setup and upgrade
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/health` | Server and configuration status |
+| GET | `/api/profiles` | Paged search |
+| GET | `/api/profiles/filters` | Search filter options |
+| GET | `/api/profiles/:id` | Public profile |
+| POST | `/api/profiles` | Create with owner passcode |
+| POST | `/api/profiles/:id/verify` | Verify owner passcode |
+| PUT | `/api/profiles/:id` | Update with owner passcode |
+| DELETE | `/api/profiles/:id` | Delete with owner passcode |
 
-1. Run the entire [supabase_schema.sql](supabase_schema.sql) in the Supabase SQL Editor.
-   The script works for fresh databases and the existing project schema. It keeps
-   existing profiles, removes the old unrestricted policies, and installs the
-   `save_gpa_profile` transactional function. Run it before deploying the updated server.
-2. Configure `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in the server environment
-   (for example, Vercel project environment variables), then redeploy the app.
-   The service-role key must never use a `VITE_` or `NEXT_PUBLIC_` prefix or be included
-   in browser code. Anonymous/publishable keys are no longer used for server writes.
-3. Verify that creating, editing, and deleting a test profile works, and that an
-   incorrect owner passcode is rejected.
+## Checks and deployment
 
-Cloud saves replace the profile and its subjects in a single database transaction.
-Any failure rolls back the entire save. A configured cloud backend is authoritative
-for writes: database errors are not converted into successful local saves.
-Serverless deployments require Supabase for profile creation.
+```sh
+npm test
+npm run typecheck
+npm run build
+```
 
-The SQL migration requires access to your Supabase project and is not applied by
-`npm run build` or `npm test`.
+Tests cover GPA/CGPA, class thresholds, validation, import, PDF pagination, multi-profile search, API CRUD, incorrect passcodes, and a simulated failed write. These use an in-memory repository and do not prove a live Supabase deployment.
 
-## Import review
+Deploy as a Vite project on Vercel with build command `npm run build` and output directory `dist`. [`vercel.json`](vercel.json) sends application routes to `index.html` while preserving `/api` routes. Apply the SQL migration and set server environment variables before deployment. Then run a real create, search, edit, wrong-passcode, delete, and PDF check in the deployed environment.
 
-Imports preserve module codes and semester assignments. Review each subject?s semester and credits before publishing. Missing credits remain blank and must be entered; module-code digits are not used to guess credits. The local text parser works without an AI API key.
+If the API reports `DATABASE_UNAVAILABLE`, configure the two Supabase variables and restart. If it reports `DATABASE_ERROR`, check that the SQL migration ran and inspect server logs for the underlying database error.
+
+## License
+
+MIT License © 2026 Calculate GPA Plus — Created by K.Kabeesan. See [LICENSE](LICENSE).
