@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { Profile, ProfileCard, ProfileDraft, ProfileFilters, SearchResult } from '../src/domain/model';
-import { defaultScale } from '../src/domain/model';
+import type { Profile, ProfileCard, ProfileDraft, ProfileFilters, SearchResult } from '../src/domain/model.js';
+import { defaultScale } from '../src/domain/model.js';
 
 export interface ProfileRepository {
   search(filters: ProfileFilters): Promise<SearchResult>;

@@ -1,4 +1,4 @@
-import type { ProfileDraft } from '../src/domain/model';
+import type { ProfileDraft } from '../src/domain/model.js';
 
 export class InputError extends Error { constructor(message: string) { super(message); } }
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);

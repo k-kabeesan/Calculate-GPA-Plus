@@ -4,11 +4,11 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
-import './env';
-import type { ProfileFilters } from '../src/domain/model';
-import { repositoryFromEnv, type ProfileRepository } from './repository';
-import { checkPasscode, hashPasscode } from './security';
-import { InputError, validateDraft, validatePasscode } from './validation';
+import './env.js';
+import type { ProfileFilters } from '../src/domain/model.js';
+import { repositoryFromEnv, type ProfileRepository } from './repository.js';
+import { checkPasscode, hashPasscode } from './security.js';
+import { InputError, validateDraft, validatePasscode } from './validation.js';
 
 type AsyncHandler = (req: Request, res: Response) => Promise<void>;
 const ok = (res: Response, data: unknown, status = 200) => res.status(status).json({ success: true, data });
