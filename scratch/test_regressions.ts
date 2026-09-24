@@ -5,6 +5,7 @@ import { createApp } from '../server/app';
 import type { Profile, ProfileCard, ProfileDraft, ProfileFilters, SearchResult } from '../src/domain/model';
 import type { ProfileRepository } from '../server/repository';
 import { newDraft } from '../src/domain/model';
+import { hashPasscode } from '../server/security';
 
 class MemoryRepository implements ProfileRepository {
   records = new Map<string, { profile: Profile; hash: string }>();
@@ -39,6 +40,7 @@ class MemoryRepository implements ProfileRepository {
 }
 
 const repo = new MemoryRepository();
+process.env.ADMIN_PASSCODE_HASH = hashPasscode('administrator');
 const server = createApp(repo).listen(0);
 await once(server, 'listening');
 const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -73,6 +75,9 @@ try {
   assert.equal((await request(`/profiles/${id}`)).json.data?.name, 'Alpha');
   repo.failWrite = false;
   assert.equal((await request(`/profiles/${id}/verify`, 'POST', { passcode: 'secret' })).status, 200);
+  assert.equal((await request(`/profiles/${id}/verify`, 'POST', { passcode: 'administrator' })).status, 200);
+  assert.equal((await request(`/profiles/${id}`, 'PUT', { ...draft, name: 'Admin Changed', passcode: 'administrator' })).status, 200);
+  assert.equal((await request(`/profiles/${id}`)).json.data?.name, 'Admin Changed');
   assert.equal((await request(`/profiles/${id}`, 'PUT', { ...draft, name: 'Changed', passcode: 'secret' })).status, 200);
   assert.equal((await request(`/profiles/${id}`)).json.data?.name, 'Changed');
   assert.equal((await request(`/profiles/${id}`, 'DELETE', { passcode: 'wrong' })).status, 401);

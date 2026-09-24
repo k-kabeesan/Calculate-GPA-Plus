@@ -40,7 +40,11 @@ export function createApp(repository: ProfileRepository | null = repositoryFromE
   const authorize = async (repo: ProfileRepository, req: Request, res: Response): Promise<boolean> => {
     const hash = await repo.getHash(param(req));
     if (hash === null) { fail(res, 404, 'PROFILE_NOT_FOUND', 'Profile not found.'); return false; }
-    if (!checkPasscode(String(req.body?.passcode ?? ''), hash)) { fail(res, 401, 'INVALID_PASSCODE', 'Incorrect owner passcode.'); return false; }
+    const passcode = String(req.body?.passcode ?? '');
+    const adminHash = process.env.ADMIN_PASSCODE_HASH ?? '';
+    const isOwner = checkPasscode(passcode, hash);
+    const isAdmin = Boolean(adminHash) && checkPasscode(passcode, adminHash);
+    if (!isOwner && !isAdmin) { fail(res, 401, 'INVALID_PASSCODE', 'Incorrect owner or administrator passcode.'); return false; }
     return true;
   };
   app.get('/api/health', (_req, res) => ok(res, { status: 'ok', databaseConfigured: Boolean(repository) }));

@@ -35,6 +35,8 @@ Created by **K.Kabeesan**.
 
 `src/domain` contains pure GPA and import rules. `src/pages` and `src/components` render the React interface. `src/services/api.ts` calls the Express API. `server/validation.ts` validates writes; `server/security.ts` handles passcode hashes; `server/repository.ts` is the sole Supabase adapter. `server/app.ts` exposes a consistent JSON API. `api/` forwards Vercel functions to the same Express app.
 
+Set the optional server-only `ADMIN_PASSCODE_HASH` environment variable to let an administrator edit or delete any profile with one passcode. Store only a scrypt hash, never the administrator passcode itself.
+
 Supabase PostgreSQL is the only profile database. Profile saves call `save_gpa_profile`, which writes a profile and all child rows in one PostgreSQL transaction. The browser never receives the service role key or a passcode hash. A temporary calculator/import draft may be held in session storage until the user creates a profile.
 
 ## Local setup
