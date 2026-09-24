@@ -49,10 +49,10 @@ export function App() {
   return <div className="site-shell">
     <header className="site-header"><div className="header-inner">
       <a className="brand" href="#/home"><span className="brand-mark"><GraduationCap size={22} /></span><span>Calculate GPA Plus</span></a>
-      <nav className={menuOpen ? 'main-nav open' : 'main-nav'} aria-label="Main navigation">
+      <nav id="main-navigation" className={menuOpen ? 'main-nav open' : 'main-nav'} aria-label="Main navigation">
         {nav.map(({ href, label, icon: Icon }) => <a key={href} className={(window.location.hash || '#/home') === href ? 'active' : ''} href={href}>{Icon && <Icon size={15} />}{label}</a>)}
       </nav>
-      <button className="menu-button" aria-label={menuOpen ? 'Close menu' : 'Open menu'} onClick={() => setMenuOpen(!menuOpen)}>
+      <button type="button" className="menu-button" aria-label={menuOpen ? 'Close menu' : 'Open menu'} aria-expanded={menuOpen} aria-controls="main-navigation" onClick={() => setMenuOpen(!menuOpen)}>
         {menuOpen ? <X size={22} /> : <Menu size={22} />}
       </button>
     </div></header>
