@@ -5,6 +5,7 @@ import { SubjectEditor } from '../components/SubjectEditor';
 import { GpaInsights } from '../components/GpaInsights';
 import { calculateGpa } from '../domain/gpa';
 import { defaultScale, newDraft, newSemester, type GradePoint } from '../domain/model';
+import { buildReport } from '../services/pdf';
 
 export function CalculatorPage() {
   const [semester, setSemester] = useState(() => newSemester(1));
@@ -33,6 +34,11 @@ export function CalculatorPage() {
     sessionStorage.setItem('gpa-new-profile', JSON.stringify({ ...newDraft(), semesters: [semester], scale }));
     window.location.hash = '#/create';
   };
+  const downloadPdf = () => {
+    setError('');
+    try { buildReport({ ...newDraft(), name: 'GPA Calculation', university, semesters: [semester], scale }, studentName); }
+    catch { setError('Unable to create the PDF. Please try again or use a different browser.'); }
+  };
   return <div className="container calculator-page"><PageHead eyebrow="NO ACCOUNT NEEDED" title="Normal GPA Calculator">Add your subjects, credits, and grades to calculate a weighted semester result.</PageHead>
     <div className="page-grid"><div className="stack">
       <section className="panel"><div className="panel-heading"><div><h2>Subjects & grades</h2><p>{semester.subjects.length} subject{semester.subjects.length === 1 ? '' : 's'} added</p></div><button className="button button-ghost" onClick={reset}><RotateCcw size={16} /> Reset</button></div>
@@ -44,7 +50,7 @@ export function CalculatorPage() {
         {showScale && <div className="scale-grid">{scale.map((item, index) => <label key={item.grade}>{item.grade}<input type="number" min="0" max="10" step="0.1" value={item.points}
           onChange={event => setScale(scale.map((entry, i) => i === index ? { ...entry, points: Number(event.target.value) } : entry))} /></label>)}</div>}</section>
     </div><aside className="stack"><section className="panel result-panel"><div className="panel-heading"><div><h2>Your result</h2><p>Credit weighted GPA</p></div></div>
-      {calculated ? <><GpaSummary result={result} /><p className="formula">GPA = Σ (credits × grade points) ÷ Σ credits</p><label>Student name for PDF<input value={studentName} onChange={event => setStudentName(event.target.value)} placeholder="Optional" /></label><label>University for PDF<input value={university} onChange={event => setUniversity(event.target.value)} placeholder="Optional" /></label><button className="button button-soft full" onClick={async () => (await import('../services/pdf')).buildReport({ ...newDraft(), name: 'GPA Calculation', university, semesters: [semester], scale }, studentName)}>Download PDF report</button></>
+      {calculated ? <><GpaSummary result={result} /><p className="formula">GPA = Σ (credits × grade points) ÷ Σ credits</p><label>Student name for PDF<input value={studentName} onChange={event => setStudentName(event.target.value)} placeholder="Optional" /></label><label>University for PDF<input value={university} onChange={event => setUniversity(event.target.value)} placeholder="Optional" /></label><button className="button button-soft full" onClick={downloadPdf}>Download PDF report</button></>
         : <p className="muted">Complete your subjects and select Calculate GPA to see the result.</p>}
     </section></aside></div>{calculated && <GpaInsights result={result} subjects={semester.subjects} scale={scale} />}
   </div>;
