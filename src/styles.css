@@ -175,3 +175,4 @@ img,svg{max-width:100%}
   th,td{padding:10px}
   .info-grid strong,.profile-card h3,.panel h2{overflow-wrap:anywhere}
 }
+.about-page-short{gap:22px}.about-page-short .about-hero{min-height:360px}.about-page-short .about-hero-copy p{max-width:650px}
